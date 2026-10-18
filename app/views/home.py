@@ -5,7 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from app.db.session import session_scope
-from app.services import academics, challenge_rules, challenges, forum, social
+from app.services import academics, accounts, challenge_rules, challenges, forum, moderation, social
 from app.ui import common
 
 
@@ -23,7 +23,10 @@ def render() -> None:
     with session_scope() as s:
         summary = academics.user_summary(s, user.id, user.current_semester)
         n_followers, n_following = social.follow_counts(s, user.id)
-        board = challenges.leaderboard(s, limit=10_000)
+        hidden = moderation.hidden_user_ids(s, user.id)
+        board = challenges.leaderboard(
+            s, limit=10_000, exclude_ids=accounts.pending_deletion_ids(s)
+        )
         my_score = next((e for e in board if e.user.id == user.id), None)
         position = next((i for i, e in enumerate(board, 1) if e.user.id == user.id), None)
 
@@ -57,7 +60,7 @@ def render() -> None:
                         st.caption("Verificación manual: marca el reto como cumplido en Retos.")
 
             st.subheader("💬 Últimas discusiones")
-            for row in forum.list_posts(s, limit=5):
+            for row in forum.list_posts(s, limit=5, exclude_author_ids=hidden):
                 st.markdown(
                     f"- **{row.post.title}** — {row.post.author.display_name} · "
                     f"{row.comments} 💬 · {row.likes} 👍"
@@ -75,7 +78,11 @@ def render() -> None:
                     st.write(m.message)
 
             st.subheader("👀 Actividad de quienes sigues")
-            activity = challenges.following_activity(s, user, limit=8)
+            activity = [
+                a
+                for a in challenges.following_activity(s, user, limit=8)
+                if a.user.id not in hidden
+            ]
             if not activity:
                 st.caption("Sigue a otras personas para ver sus logros aquí.")
             for a in activity:

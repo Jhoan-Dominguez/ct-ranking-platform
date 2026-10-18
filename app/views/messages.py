@@ -7,6 +7,7 @@ import streamlit as st
 from app.db.session import session_scope
 from app.services import social
 from app.ui import common
+from app.ui.moderation import actions_menu
 from app.views.community import support_dialog
 
 
@@ -24,13 +25,15 @@ def render() -> None:
                 st.info("Aún no has recibido mensajes de apoyo.")
             for m in messages:
                 with st.container(border=True):
-                    head, action = st.columns([5, 1], vertical_alignment="center")
+                    head, action, more = st.columns([5, 1, 0.8], vertical_alignment="center")
                     with head:
                         new = " 🆕" if m.id in unread else ""
                         common.user_chip(m.sender, 32, common.fmt_dt(m.created_at) + new)
                         st.markdown(f"> {m.message}")
                     if action.button("Responder", key=f"reply_{m.id}", icon="↩️"):
                         support_dialog(user.id, m.sender_id, m.sender.display_name)
+                    with more:
+                        actions_menu(user.id, m.sender_id, m.sender.display_name, f"msg_{m.id}")
         with tab_out:
             messages = social.sent(s, user.id)
             if not messages:

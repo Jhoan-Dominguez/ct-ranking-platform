@@ -1,12 +1,13 @@
-"""Personas: buscar, seguir, ver perfiles y enviar mensajes de apoyo."""
+"""Personas: buscar, seguir, ver perfiles, enviar mensajes de apoyo, reportar y bloquear."""
 
 from __future__ import annotations
 
 import streamlit as st
 
 from app.db.session import session_scope
-from app.services import challenges, social, users
+from app.services import accounts, challenges, moderation, social, users
 from app.ui import common
+from app.ui.moderation import actions_menu
 
 
 @st.dialog("Enviar mensaje de apoyo")
@@ -29,7 +30,7 @@ def support_dialog(sender_id: int, recipient_id: int, recipient_name: str) -> No
 
 def _person_row(me, person, following: set[int], key: str) -> None:
     with st.container(border=True):
-        info, b1, b2, b3 = st.columns([4, 1, 1, 1], vertical_alignment="center")
+        info, b1, b2, b3, b4 = st.columns([4, 1, 1, 1, 0.8], vertical_alignment="center")
         with info:
             subtitle = " · ".join(
                 x for x in (person.program, f"semestre {person.current_semester}") if x
@@ -48,6 +49,8 @@ def _person_row(me, person, following: set[int], key: str) -> None:
         if b3.button("Perfil", key=f"prof_{key}_{person.id}", width="stretch"):
             st.session_state["profile_id"] = person.id
             st.rerun()
+        with b4:
+            actions_menu(me.id, person.id, person.display_name, key=f"{key}_{person.id}")
 
 
 def _public_profile(me, person_id: int) -> None:
@@ -56,11 +59,14 @@ def _public_profile(me, person_id: int) -> None:
         st.rerun()
     with session_scope() as s:
         person = users.get_user(s, person_id)
-        if person is None:
-            st.warning("Usuario no encontrado.")
+        if person is None or person_id in moderation.hidden_user_ids(s, me.id):
+            # Bloqueos (en cualquier dirección) o cuenta en proceso de eliminación.
+            st.warning("Este perfil no está disponible.")
             return
         n_followers, n_following = social.follow_counts(s, person.id)
-        board = challenges.leaderboard(s, limit=10_000)
+        board = challenges.leaderboard(
+            s, limit=10_000, exclude_ids=accounts.pending_deletion_ids(s)
+        )
         score = next((e for e in board if e.user.id == person.id), None)
 
         left, right = st.columns([1, 3])
@@ -111,25 +117,46 @@ def render() -> None:
         return
 
     st.title("👥 Personas")
-    tab_explore, tab_followers, tab_following = st.tabs(["Explorar", "Seguidores", "Siguiendo"])
+    tab_explore, tab_followers, tab_following, tab_blocked = st.tabs(
+        ["Explorar", "Seguidores", "Siguiendo", "Bloqueados"]
+    )
     with session_scope() as s:
         following = social.following_ids(s, me.id)
+        hidden = moderation.hidden_user_ids(s, me.id)
         with tab_explore:
             query = st.text_input("Buscar por nombre, alias, usuario o programa")
-            people = users.search_users(s, query, exclude_id=me.id)
+            people = users.search_users(s, query, exclude_id=me.id, hidden_ids=hidden)
             if not people:
                 st.info("No se encontraron personas.")
             for person in people:
                 _person_row(me, person, following, "exp")
         with tab_followers:
-            people = social.followers(s, me.id)
+            people = [p for p in social.followers(s, me.id) if p.id not in hidden]
             if not people:
                 st.info("Todavía nadie te sigue. ¡Participa en foros y retos para darte a conocer!")
             for person in people:
                 _person_row(me, person, following, "fwr")
         with tab_following:
-            people = social.following(s, me.id)
+            people = [p for p in social.following(s, me.id) if p.id not in hidden]
             if not people:
                 st.info("Aún no sigues a nadie.")
             for person in people:
                 _person_row(me, person, following, "fwg")
+        with tab_blocked:
+            st.caption(
+                "Las personas bloqueadas no pueden ver tu contenido ni tú el suyo, y no pueden "
+                "seguirse ni enviarse mensajes."
+            )
+            blocked = moderation.blocked_users(s, me.id)
+            if not blocked:
+                st.info("No has bloqueado a nadie.")
+            for person in blocked:
+                with st.container(border=True):
+                    info, action = st.columns([5, 1], vertical_alignment="center")
+                    with info:
+                        common.user_chip(person, 36)
+                    if action.button("Desbloquear", key=f"unblock_{person.id}", width="stretch"):
+                        common.run_action(
+                            lambda s2, pid=person.id: moderation.unblock(s2, me.id, pid),
+                            f"Desbloqueaste a {person.display_name}",
+                        )

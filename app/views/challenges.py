@@ -8,7 +8,7 @@ import streamlit as st
 
 from app.db.models import ChallengeKind, Difficulty, Visibility
 from app.db.session import session_scope
-from app.services import challenge_rules, challenges, social
+from app.services import challenge_rules, challenges, moderation, social
 from app.ui import common
 
 DIFFICULTY_LABELS = {
@@ -171,7 +171,11 @@ def render() -> None:
     left, right = st.columns([2.2, 1], gap="large")
     with session_scope() as s:
         rows = challenges.list_challenges(
-            s, user, scope=challenges.SCOPES[scope_label or "Todos"], only_open=only_open
+            s,
+            user,
+            scope=challenges.SCOPES[scope_label or "Todos"],
+            only_open=only_open,
+            hidden_creator_ids=moderation.hidden_user_ids(s, user.id),
         )
         with left:
             if not rows:

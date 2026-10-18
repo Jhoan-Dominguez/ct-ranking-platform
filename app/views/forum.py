@@ -5,8 +5,9 @@ from __future__ import annotations
 import streamlit as st
 
 from app.db.session import session_scope
-from app.services import forum, social
+from app.services import forum, moderation, social
 from app.ui import common
+from app.ui.moderation import report_dialog
 
 
 @st.dialog("Nueva publicación", width="large")
@@ -44,6 +45,8 @@ def _post_list(user) -> None:
             category=None if category == "Todas" else category,
             solved={"Todas": None, "Abiertas": False, "Resueltas": True}[status],
             author_ids=social.following_ids(s, user.id) if only_following else None,
+            # Usuarios bloqueados (en cualquier dirección) o con la cuenta en eliminación.
+            exclude_author_ids=moderation.hidden_user_ids(s, user.id),
             order=forum.ORDERINGS[order],
         )
         if not rows:
@@ -75,9 +78,10 @@ def _post_detail(user, post_id: int) -> None:
 
     with session_scope() as s:
         post = forum.get_post(s, post_id)
-        if post is None:
+        hidden = moderation.hidden_user_ids(s, user.id)
+        if post is None or post.author_id in hidden:
             st.session_state.pop("post_id", None)
-            st.warning("La publicación ya no existe.")
+            st.warning("La publicación ya no existe o no está disponible.")
             return
         liked = any(like.user_id == user.id for like in post.likes)
         can_moderate = user.is_admin or user.id == post.author_id
@@ -91,7 +95,7 @@ def _post_detail(user, post_id: int) -> None:
         with st.container(border=True):
             st.markdown(post.body)
 
-        actions = st.columns([1, 1, 1, 3])
+        actions = st.columns([1, 1, 1, 1, 2])
         if actions[0].button(
             f"{'💙' if liked else '👍'} {len(post.likes)}", help="Me gusta", key="like"
         ):
@@ -106,9 +110,12 @@ def _post_detail(user, post_id: int) -> None:
             if actions[2].button("Eliminar", icon="🗑️"):
                 st.session_state.pop("post_id", None)
                 common.run_action(lambda s2: forum.delete_post(s2, user, post_id), "Eliminada")
+        if user.id != post.author_id and actions[3].button("Reportar", icon="🚩"):
+            report_dialog(user.id, post.author_id, post.author.display_name, post_id=post.id)
 
-        st.subheader(f"💬 Comentarios ({len(post.comments)})")
-        for c in post.comments:
+        comments = [c for c in post.comments if c.author_id not in hidden]
+        st.subheader(f"💬 Comentarios ({len(comments)})")
+        for c in comments:
             with st.container(border=True):
                 head, tail = st.columns([6, 1])
                 with head:
@@ -120,6 +127,10 @@ def _post_detail(user, post_id: int) -> None:
                     common.run_action(
                         lambda s2, cid=c.id: forum.delete_comment(s2, user, cid), "Eliminado"
                     )
+                if user.id != c.author_id and tail.button(
+                    "🚩", key=f"rep_c_{c.id}", help="Reportar comentario"
+                ):
+                    report_dialog(user.id, c.author_id, c.author.display_name, comment_id=c.id)
 
     with st.form("comment", clear_on_submit=True):
         body = st.text_area("Escribe una respuesta o comentario", height=120)
