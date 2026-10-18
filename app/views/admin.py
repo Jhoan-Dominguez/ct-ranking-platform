@@ -8,9 +8,9 @@ import streamlit as st
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db.models import Role, User
+from app.db.models import ReportReason, ReportStatus, Role, User
 from app.db.session import session_scope
-from app.services import academics, admin, auth, challenges, forum
+from app.services import academics, accounts, admin, auth, challenges, forum, moderation
 from app.ui import common
 from app.views.academics import credits_chart
 
@@ -18,6 +18,11 @@ STUDENT_COLUMNS = {
     "promedio_general": st.column_config.NumberColumn("Prom. general", format="%.2f"),
     "promedio_semestre": st.column_config.NumberColumn("Prom. semestre", format="%.2f"),
     "en_riesgo": st.column_config.CheckboxColumn("En riesgo"),
+    "verificado": st.column_config.CheckboxColumn("Correo verificado"),
+    "eliminacion_programada": st.column_config.DatetimeColumn(
+        "Se elimina el", format="DD/MM/YY HH:mm"
+    ),
+    "reportes_recibidos": st.column_config.NumberColumn("Reportes"),
     "ultimo_ingreso": st.column_config.DatetimeColumn("Último ingreso", format="DD/MM/YY HH:mm"),
 }
 
@@ -39,6 +44,10 @@ def _overview(s) -> None:
     rate = m.completions / m.participations if m.participations else 0
     row2[4].metric("Tasa de éxito en retos", f"{rate:.0%}")
     row2[5].metric("Notas registradas", m.grade_items)
+    row3 = st.columns(6)
+    row3[0].metric("Reportes pendientes", m.pending_reports)
+    row3[1].metric("Cuentas por eliminar", m.pending_deletions)
+    row3[2].metric("Cuentas sin activar", m.unverified_users)
 
     activity = admin.activity_frame(s, days=30)
     c1, c2 = st.columns(2)
@@ -311,7 +320,9 @@ def _content(s, admin_user: User) -> None:
     if df.empty:
         return
     c1, c2 = st.columns([1, 3], vertical_alignment="bottom")
-    target = c1.selectbox("ID a eliminar", df["id"].tolist(), index=None, key=f"del_{kind}")
+    target = c1.selectbox(
+        "ID a eliminar", df["id"].tolist(), index=None, key=f"del_{kind}", placeholder="Selecciona…"
+    )
     if target is not None and c2.button(f"Eliminar de {kind.lower()}", icon="🗑️"):
         target = int(target)
         actions = {
@@ -323,12 +334,133 @@ def _content(s, admin_user: User) -> None:
         common.run_action(actions[kind], "Elemento eliminado")
 
 
+def _reports(s, admin_user: User) -> None:
+    status_options = {
+        "🕒 Pendientes": ReportStatus.PENDING,
+        "✅ Resueltos": ReportStatus.RESOLVED,
+        "🚫 Descartados": ReportStatus.DISMISSED,
+        "Todos": None,
+    }
+    choice = st.segmented_control(
+        "Estado", list(status_options), default="🕒 Pendientes", key="report_status"
+    )
+    reports = moderation.list_reports(s, status_options.get(choice or "🕒 Pendientes"))
+    if not reports:
+        st.success("No hay reportes en esta vista.")
+        return
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "ID": r.id,
+                    "Fecha": r.created_at,
+                    "Reportado": r.reported.username,
+                    "Reportado por": r.reporter.username,
+                    "Motivo": moderation.REASON_LABELS[ReportReason(r.reason)],
+                    "Contenido": "publicación"
+                    if r.post_id
+                    else "comentario"
+                    if r.comment_id
+                    else "perfil",
+                    "Estado": moderation.STATUS_LABELS[ReportStatus(r.status)],
+                    "Reportes contra el usuario": moderation.reports_against_count(
+                        s, r.reported_id
+                    ),
+                }
+                for r in reports
+            ]
+        ),
+        hide_index=True,
+        width="stretch",
+        column_config={"Fecha": st.column_config.DatetimeColumn(format="DD/MM/YY HH:mm")},
+    )
+    labels = {r.id: f"#{r.id} · {r.reported.username} · {r.reason}" for r in reports}
+    report_id = st.selectbox(
+        "Revisar reporte",
+        list(labels),
+        format_func=labels.get,
+        index=None,
+        placeholder="Selecciona un reporte…",
+    )
+    if report_id is None:
+        return
+    r = next(x for x in reports if x.id == report_id)
+    with st.container(border=True):
+        common.user_chip(r.reported, 36, f"reportado por @{r.reporter.username}")
+        st.markdown(
+            f"**Motivo:** {moderation.REASON_LABELS[ReportReason(r.reason)]}  \n"
+            f"**Detalles:** {r.description or '—'}"
+        )
+        if r.post:
+            st.markdown(f"**Publicación:** {r.post.title}")
+            st.caption(r.post.body[:500])
+        elif r.comment:
+            st.markdown("**Comentario:**")
+            st.caption(r.comment.body[:500])
+        elif r.post_id is None and r.comment_id is None:
+            st.caption("Reporte sobre el perfil del usuario.")
+        if r.status != ReportStatus.PENDING:
+            who = r.resolved_by.username if r.resolved_by else "—"
+            st.info(
+                f"{moderation.STATUS_LABELS[ReportStatus(r.status)]} por @{who} el "
+                f"{common.fmt_dt(r.resolved_at)}. {r.admin_note}"
+            )
+            return
+        note = st.text_input("Nota de resolución (opcional)", key=f"note_{r.id}")
+        c1, c2, c3, c4 = st.columns(4)
+        if c1.button("Resolver", icon="✅", type="primary", key=f"resolve_{r.id}"):
+            common.run_action(
+                lambda s2: moderation.close_report(
+                    s2, admin_user, r.id, ReportStatus.RESOLVED, note
+                ),
+                "Reporte resuelto",
+            )
+        if c2.button("Descartar", icon="🚫", key=f"dismiss_{r.id}"):
+            common.run_action(
+                lambda s2: moderation.close_report(
+                    s2, admin_user, r.id, ReportStatus.DISMISSED, note
+                ),
+                "Reporte descartado",
+            )
+        if (r.post_id or r.comment_id) and c3.button(
+            "Eliminar contenido", icon="🗑️", key=f"del_content_{r.id}"
+        ):
+
+            def _delete_content(s2):
+                if r.post_id:
+                    forum.delete_post(s2, admin_user, r.post_id)
+                else:
+                    forum.delete_comment(s2, admin_user, r.comment_id)
+                moderation.close_report(
+                    s2, admin_user, r.id, ReportStatus.RESOLVED, note or "Contenido eliminado"
+                )
+
+            common.run_action(_delete_content, "Contenido eliminado y reporte resuelto")
+        if r.reported.is_active and c4.button(
+            "Deshabilitar usuario", icon="⛔", key=f"disable_{r.id}"
+        ):
+
+            def _disable(s2):
+                auth.set_active(s2, s2.get(User, r.reported_id), False)
+                moderation.close_report(
+                    s2, admin_user, r.id, ReportStatus.RESOLVED, note or "Cuenta deshabilitada"
+                )
+
+            common.run_action(_disable, "Usuario deshabilitado y reporte resuelto")
+
+
 def _users(s, admin_user: User, all_users: list[User]) -> None:
     st.dataframe(
         admin.students_frame(s), hide_index=True, width="stretch", column_config=STUDENT_COLUMNS
     )
     labels = _user_label(all_users)
-    user_id = st.selectbox("Usuario a gestionar", list(labels), format_func=labels.get, index=None)
+    user_id = st.selectbox(
+        "Usuario a gestionar",
+        list(labels),
+        format_func=labels.get,
+        index=None,
+        placeholder="Selecciona un usuario…",
+    )
     if user_id is None:
         return
     target = next(u for u in all_users if u.id == user_id)
@@ -352,6 +484,19 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
             )
     if target.id == admin_user.id:
         st.caption("No puedes cambiar tu propio rol ni deshabilitar tu cuenta.")
+    if target.pending_deletion:
+        st.warning(
+            f"Eliminación programada para el {common.fmt_dt(target.deletion_scheduled_for)} "
+            f"(solicitada el {common.fmt_dt(target.deletion_requested_at)}).",
+            icon="⚠️",
+        )
+        if st.button("Cancelar la eliminación de esta cuenta"):
+            common.run_action(
+                lambda s2: accounts.cancel_deletion(s2, s2.get(User, user_id)),
+                "Eliminación cancelada",
+            )
+    if not target.email_verified:
+        st.info("Esta cuenta aún no activó su correo.", icon="📧")
 
 
 def render() -> None:
@@ -360,7 +505,10 @@ def render() -> None:
         st.error("No tienes permisos para ver esta página.")
         st.stop()
     st.title("🛡️ Panel de administrador")
-    tabs = st.tabs(["Resumen", "Estudiante", "Grupos", "Contenido", "Usuarios"])
+    with session_scope() as s:
+        pending = moderation.pending_reports_count(s)
+    reports_label = f"Reportes ({pending})" if pending else "Reportes"
+    tabs = st.tabs(["Resumen", "Estudiante", "Grupos", "Contenido", reports_label, "Usuarios"])
     with session_scope() as s:
         all_users = list(s.scalars(select(User).order_by(User.username)))
         with tabs[0]:
@@ -372,4 +520,6 @@ def render() -> None:
         with tabs[3]:
             _content(s, user)
         with tabs[4]:
+            _reports(s, user)
+        with tabs[5]:
             _users(s, user, all_users)
