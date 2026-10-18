@@ -24,7 +24,7 @@ Hay dos emisores de correo. Ambos usan el mismo servidor SMTP:
 | Emisor | Correos | Configuración |
 |--------|---------|---------------|
 | **Keycloak** | Verificación de cuenta («Verificación de email») y configuración del 2FA («Actualiza tu cuenta») | SMTP del realm, que aplica `scripts/configure_keycloak.py` en cada `make up`. Usa `KEYCLOAK_SMTP_HOST` y `KEYCLOAK_SMTP_PORT`, con valor por defecto `mailpit:1025` dentro de la red de Docker. |
-| **La app** (`app/services/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada y aviso de cancelación | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `localhost:1025`. |
+| **La app** (`app/core/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada y aviso de cancelación | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `localhost:1025`. |
 
 **En desarrollo**, Mailpit (`axllent/mailpit:v1.31.3`) atrapa todos los correos sin enviarlos a
 nadie. Para verlos, abre **http://localhost:8025**. Sus enlaces (activación y 2FA) funcionan

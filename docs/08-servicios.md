@@ -1,6 +1,7 @@
 # 8. Servicios (lógica de negocio)
 
-Todos los módulos están en `app/services/`. Comparten varias convenciones:
+La lógica de negocio está en `app/services/` (un módulo por dominio). La identidad está en el
+paquete `app/auth/` y el correo en `app/core/mailer.py`. Todos comparten varias convenciones:
 
 - Reciben una `Session` como primer argumento y **no** hacen `commit`. El commit lo hace
   `session_scope()`.
@@ -10,7 +11,7 @@ Todos los módulos están en `app/services/`. Comparten varias convenciones:
 
 | Módulo | Excepción | Responsabilidad |
 |--------|-----------|-----------------|
-| `auth.py` | `AuthError` | Login, registro y credenciales (Keycloak o local). |
+| `app/auth/` (paquete) | `AuthError` | Login, registro, credenciales, 2FA y Google (Keycloak o local). |
 | `users.py` | `ProfileError` | Perfil, avatar y búsqueda de personas. |
 | `forum.py` | `ForumError` | Publicaciones, comentarios y "me gusta". |
 | `social.py` | `SocialError` | Seguidores y mensajes de apoyo. |
@@ -18,15 +19,24 @@ Todos los módulos están en `app/services/`. Comparten varias convenciones:
 | `challenges.py` | `ChallengeError` | Retos, participación, ranking y leaderboard. |
 | `challenge_rules.py` | — | Reglas de verificación automática. |
 | `admin.py` | — | Métricas y consultas del panel de administrador. |
-| `accounts.py` | `AccountError` | Eliminación diferida de cuentas con doble verificación y purga. |
+| `app/auth/accounts.py` | `AccountError` | Eliminación diferida de cuentas con doble verificación y purga. |
 | `moderation.py` | `ModerationError` | Bloqueos entre usuarios y reportes. |
-| `mailer.py` | `MailError` | Envío de correos de la app (SMTP o memoria). |
+| `app/core/mailer.py` | `MailError` | Envío de correos de la app (SMTP o memoria). |
 
 ---
 
-## `auth.py`
+## `app/auth/` (autenticación)
 
-Ver el detalle en [Autenticación](05-autenticacion.md).
+Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en:
+
+| Módulo | Contenido |
+|--------|-----------|
+| `service.py` | API pública (lo que reexporta `app/auth/__init__.py`). |
+| `keycloak.py` | `KeycloakClient` e `Identity`: login por contraseña, API de administración, correos y credenciales OTP. |
+| `validation.py` | Usuario, correo, dominio institucional, nombres y contraseña. |
+| `passwords.py` | `hash_password` y `check_password` (bcrypt). |
+| `errors.py` | `AuthError`, `EmailNotVerifiedError` e `INVALID_LOGIN`. |
+| `accounts.py` | Eliminación diferida (ver más abajo). |
 
 | Función | Descripción |
 |---------|-------------|
@@ -148,7 +158,7 @@ Funciones: `progress(session, code, user_id) -> (actual, meta)` e `is_satisfied(
 | `challenges_frame`, `posts_frame`, `comments_frame`, `messages_frame` | Tablas de contenido para moderar. |
 | `set_role(session, user_id, role)`, `delete_message(session, id)` | Gestión. |
 
-## `accounts.py`
+## `app/auth/accounts.py`
 
 | Función | Descripción |
 |---------|-------------|
@@ -170,7 +180,7 @@ Funciones: `progress(session, code, user_id) -> (actual, meta)` e `is_satisfied(
 | `close_report(session, admin, report_id, status, note)` | Resuelve o descarta un reporte (sólo administradores). |
 | `REASON_LABELS`, `STATUS_LABELS` | Etiquetas en español para la UI. |
 
-## `mailer.py`
+## `app/core/mailer.py`
 
 `send(to, subject, paragraphs)` envía un correo multiparte (texto + HTML) por SMTP (`SMTP_*`).
 Con `MAIL_BACKEND=memory` lo guarda en `OUTBOX`. Si el envío falla, lanza `MailError`.
@@ -182,7 +192,7 @@ Con `MAIL_BACKEND=memory` lo guarda en `OUTBOX`. Si el envío falla, lanza `Mail
   hora.
 - `python -m app.jobs.purge_accounts` la ejecuta una vez desde la línea de comandos.
 
-## Catálogo `app/data/pensums.py`
+## Catálogo `app/database/seeds/pensums.py`
 
 | Elemento | Descripción |
 |----------|-------------|

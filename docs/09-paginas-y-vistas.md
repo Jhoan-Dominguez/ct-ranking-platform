@@ -1,22 +1,21 @@
 # 9. Páginas y vistas
 
-Cada página es un módulo de `app/views/` con una función `render()`, y `app/main.py` las
+Cada página es un módulo de `app/ui/pages/` con una función `render()`, y `app/main.py` las
 registra en `st.navigation`. Esta guía describe qué ve el usuario en cada una, qué acciones puede
 hacer, qué servicios usa y qué tablas lee o escribe.
 
-Componentes compartidos (`app/ui/common.py`):
+Componentes compartidos (`app/ui/components/`):
 
-| Componente | Uso |
-|------------|-----|
-| `current_user()` / `require_user()` | Recargan el usuario autenticado. Si no hay sesión, detienen el render. |
-| `ui/moderation.py`: `actions_menu()`, `report_dialog()`, `block_dialog()` | Menú «Más» con Reportar y Bloquear, y sus diálogos. Se usa en Personas, Foros y Mensajes. |
-| `run_action(fn, mensaje)` | Ejecuta una escritura en su propia transacción. Ver [Persistencia](07-persistencia.md#escritura-commonrun_action). |
-| `flash()` / `show_flashes()` | Avisos tipo *toast* que sobreviven al rerun. |
-| `avatar_html()`, `user_chip()` | Foto o iniciales, nombre visible, `@usuario` y un subtítulo. |
-| `challenge_ranking_banner()` | Banner del ranking de un reto (participantes, % de éxito, primero en completar, orden). |
-| `leaderboard_banner()` | Ranking por puntos (general, de amigos o de un grupo). |
-| `fmt_grade()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, fechas (zona horaria local) y etiquetas de categoría. |
-| `enable_sidebar_hover()` | Inyecta `app/ui/sidebar_hover.js`: con el menú lateral oculto, pasar el mouse por el borde izquierdo lo expande. |
+| Módulo | Funciones | Uso |
+|--------|-----------|-----|
+| `session.py` | `current_user()`, `require_user()`, `logout()`, `sync_oidc_session()` | Recargan el usuario autenticado (si no hay sesión, detienen el render), cierran la sesión (también la de Google/Keycloak) y vinculan la sesión de «Continuar con Google». |
+| `actions.py` | `run_action(fn, mensaje)`, `flash()`, `show_flashes()`, `USER_ERRORS` | Ejecuta una escritura en su propia transacción (ver [Persistencia](07-persistencia.md#escritura-actionsrun_action)). Los avisos tipo *toast* sobreviven al rerun. |
+| `formatting.py` | `fmt_grade()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, fechas (zona horaria local) y etiquetas de categoría. |
+| `widgets.py` | `avatar_html()`, `user_chip()`, `institutional_email_input()` | Foto o iniciales, nombre visible y `@usuario`. Campo de correo con el dominio institucional fijo. |
+| `charts.py` | `credits_chart()`, `averages_chart()` | Avance de créditos por categoría y evolución del promedio. Las usan el Plan académico y el panel de administrador. |
+| `rankings.py` | `challenge_ranking_banner()`, `leaderboard_banner()` | Ranking de un reto (participantes, % de éxito, primero en completar, orden) y ranking por puntos (general, de amigos o de un grupo). |
+| `moderation.py` | `actions_menu()`, `report_dialog()`, `block_dialog()` | Menú «Más» con Reportar y Bloquear, y sus diálogos. Se usa en Personas, Foros y Mensajes. |
+| `sidebar.py` | `enable_sidebar_hover()` | Inyecta `app/ui/assets/sidebar_hover.js`: con el menú lateral oculto, pasar el mouse por el borde izquierdo lo expande. |
 
 ### Menú lateral: expandir al pasar el mouse
 
@@ -38,7 +37,7 @@ vuelve a ocultar tras 0,4 s.
 
 ---
 
-## 🔐 Ingresar (`views/login.py`)
+## 🔐 Ingresar (`ui/pages/login.py`)
 
 Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 
@@ -47,6 +46,11 @@ Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 | Iniciar sesión | Usuario o correo, contraseña y **código de verificación (2FA)**, que es opcional y sólo se usa si el usuario lo activó | `auth.login` → guarda `user_id` en la sesión y muestra «¡Bienvenido…!». |
 | Crear cuenta | Nombre, apellido, usuario, **correo institucional** (sólo la parte antes de la @; el dominio `@estudiantes.areandina.edu.co` es fijo) y contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register`. Con Keycloak aparece «Te enviamos un enlace de activación a …». |
 
+- **Continuar con Google** (sólo si `GOOGLE_CLIENT_ID` está configurado): debajo del formulario.
+  - Lleva a Google a través de Keycloak y sólo acepta cuentas `@estudiantes.areandina.edu.co`.
+  - Si la cuenta elegida no es institucional, muestra el error y el botón «Usar otra cuenta de
+    Google».
+  - Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md).
 - **Cuenta sin activar.** Si alguien intenta entrar sin haber activado la cuenta, aparece «Tu
   cuenta aún no está activada» con el botón **Reenviar correo de activación**.
 - **Reenvío sin intento de login.** El expander «¿No recibiste el correo de activación?» permite
@@ -56,12 +60,12 @@ Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 ### Pantalla «Tu cuenta será eliminada»
 
 Si la cuenta tiene la eliminación programada, al iniciar sesión **sólo** se muestra esta
-pantalla (definida en `app/main.py`). Indica la fecha de borrado y ofrece **Cancelar
+pantalla (`app/ui/pages/account_pending.py`). Indica la fecha de borrado y ofrece **Cancelar
 eliminación** (`accounts.cancel_deletion`) o **Cerrar sesión**.
 
 **Tablas:** `users` (lectura y escritura); Keycloak, si está activo.
 
-## 🏠 Inicio (`views/home.py`, `/inicio`)
+## 🏠 Inicio (`ui/pages/home.py`, `/inicio`)
 
 | Sección | Contenido | Servicios |
 |---------|-----------|-----------|
@@ -72,7 +76,7 @@ eliminación** (`accounts.cancel_deletion`) o **Cerrar sesión**.
 | 💌 Apoyos recibidos | Los últimos 5 mensajes. | `social.inbox` |
 | 👀 Actividad de quienes sigues | Últimos retos completados por las personas que sigo. | `challenges.following_activity` |
 
-## 💬 Foros (`views/forum.py`, `/foros`)
+## 💬 Foros (`ui/pages/forum.py`, `/foros`)
 
 **Vista de lista:**
 
@@ -103,7 +107,7 @@ eliminación** (`accounts.cancel_deletion`) o **Cerrar sesión**.
 **Tablas:** `posts`, `comments`, `post_likes`, `follows` (filtro), `user_blocks`,
 `user_reports` y `users`.
 
-## 📚 Plan académico (`views/academics.py`, `/academico`)
+## 📚 Plan académico (`ui/pages/academics.py`, `/academico`)
 
 ### Encabezado
 
@@ -199,7 +203,7 @@ cantidad de ítems.
 
 **Tablas:** `subjects`, `grade_items` y `users` (datos del plan).
 
-## 🏆 Retos (`views/challenges.py`, `/retos`)
+## 🏆 Retos (`ui/pages/challenges.py`, `/retos`)
 
 La página tiene dos columnas (2,2 : 1).
 
@@ -238,7 +242,7 @@ La página tiene dos columnas (2,2 : 1).
 **Tablas:** `challenges`, `challenge_participants`, `follows` y `users`. Las reglas consultan
 además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
 
-## 👥 Personas (`views/community.py`, `/personas`)
+## 👥 Personas (`ui/pages/community.py`, `/personas`)
 
 - **Pestañas Explorar, Seguidores y Siguiendo.**
   - *Explorar* incluye una búsqueda por nombre, alias, usuario o programa.
@@ -263,7 +267,7 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
 **Tablas:** `users`, `follows`, `support_messages`, `challenge_participants`, `user_blocks` y
 `user_reports`.
 
-## 💌 Mensajes de apoyo (`views/messages.py`, `/mensajes`)
+## 💌 Mensajes de apoyo (`ui/pages/messages.py`, `/mensajes`)
 
 - **Recibidos:**
   - Remitente, fecha, marca 🆕 en los no leídos, mensaje y botón **Responder** (abre el mismo
@@ -279,7 +283,7 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   mensajes de usuarios bloqueados o con la cuenta en eliminación no se muestran.
 
 
-## 👤 Mi perfil (`views/profile.py`, `/perfil`)
+## 👤 Mi perfil (`ui/pages/profile.py`, `/perfil`)
 
 - **Columna izquierda:**
   - Foto actual, con opciones para **subir** una nueva (png, jpg, jpeg o webp, máx. 5 MB) o
@@ -309,7 +313,7 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
 
 **Tablas:** `users`; Keycloak, si está activo.
 
-## 🛡️ Panel de administrador (`views/admin.py`, `/admin`)
+## 🛡️ Panel de administrador (`ui/pages/admin.py`, `/admin`)
 
 Sólo está disponible para `role == "admin"`. La página vuelve a verificar el rol y detiene el
 render si no corresponde. Tiene cinco pestañas:

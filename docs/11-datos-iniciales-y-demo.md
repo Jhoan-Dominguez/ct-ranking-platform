@@ -2,7 +2,7 @@
 
 ## Datos base (`make up` / `make init-db`)
 
-`app/db/init_db.py` → `seed_base()` es **idempotente** y crea:
+`app/database/seeds/base.py` → `seed_base()` (lo llama `app/database/init_db.py`) es **idempotente** y crea:
 
 1. **Usuario administrador.**
    - Se crea con `APP_ADMIN_USERNAME`, `APP_ADMIN_EMAIL`, nombre "Administrador CT" y
@@ -28,7 +28,7 @@
 
 ## Pensum de Ingeniería de Software
 
-**Fuente:** [`docs/pensum.png`](pensum.png). **Código:** `app/data/pensums.py`
+**Fuente:** [`docs/pensum.png`](pensum.png). **Código:** `app/database/seeds/pensums.py`
 (`SOFTWARE_ENGINEERING`).
 
 - **Tamaño:** 9 semestres, 60 materias y **148 créditos**.
@@ -36,7 +36,7 @@
   Introducción a la Ingeniería de Software.
 - **Créditos:** la imagen del pensum **no indica créditos**. Los valores se asignaron como
   estimación (asignaturas técnicas y de ciencias = 3, formación humana = 1–2, inglés = 1,
-  Práctica Empresarial = 6). Se pueden ajustar en `app/data/pensums.py`.
+  Práctica Empresarial = 6). Se pueden ajustar en `app/database/seeds/pensums.py`.
 
 ### Categorías
 
@@ -66,7 +66,7 @@ T = tecnología, C = ciencias, H = humanidades, I = idiomas.
 ### Agregar otro programa al catálogo
 
 ```python
-# app/data/pensums.py
+# app/database/seeds/pensums.py
 INDUSTRIAL = Pensum(
     program="Ingeniería Industrial",
     plan="Pensum Ingeniería Industrial",
@@ -81,7 +81,7 @@ prefijo de código distinto, adaptando `_semester`.
 
 ## Datos de demostración (`make seed-demo`)
 
-`app/db/demo_data.py` → `load_demo()`:
+`app/database/seeds/demo.py` → `load_demo()`:
 
 - Es **idempotente**: si el primer usuario demo ya existe, no hace nada.
 - Usa una semilla fija (`random.Random(7)`), así que los datos son reproducibles.

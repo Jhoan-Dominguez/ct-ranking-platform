@@ -58,8 +58,13 @@ make test                                                     # todas
 |---------|-------|
 | `test_academics.py` | Nota simple, ponderada y mixta; materia sin ítems; promedios ponderados por créditos y estados; CRUD de ítems con validación de escala y del 100 %; propiedad; **avance de créditos por categoría con materias repetidas**; **carga idempotente del pensum**; validación de categoría. |
 | `test_challenges.py` | Sólo un admin crea retos globales; orden del ranking y bonus del primero; visibilidad "sólo seguidores"; retos cerrados; reglas automáticas; un usuario antiguo completa al unirse. |
-| `test_social_forum_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; alias único y límites de semestre; seguir y mensajes no leídos; flujo y permisos del foro; marca de riesgo en el panel.; dominio institucional obligatorio para estudiantes y exención de administradores. |
-| `test_accounts_moderation.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación; bloqueos (seguimientos, mensajes, búsqueda, foro, bidireccionalidad); reportes (validaciones, duplicados, cierre por admin, conservación al borrar el contenido). |
+| `test_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; dominio institucional y exención de administradores; login con Google (creación y vínculo de usuario, rechazo de otros dominios, de correos no verificados y de cuentas deshabilitadas); regresión del primer login desde Keycloak. |
+| `test_users.py` | Alias único y límites de semestre del perfil. |
+| `test_social.py` | Seguir, dejar de seguir y mensajes de apoyo no leídos. |
+| `test_forum.py` | Flujo del foro y permisos (autor o admin). |
+| `test_admin.py` | Marca de estudiante en riesgo y métricas globales. |
+| `test_accounts.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación. |
+| `test_moderation.py` | Bloqueos (seguimientos, mensajes, búsqueda, foro, bidireccionalidad) y reportes (validaciones, duplicados, cierre por admin, conservación al borrar el contenido). |
 
 ### Pruebas de la interfaz (manuales o con `AppTest`)
 
@@ -74,7 +79,7 @@ def view_script(module_name, root):
     import importlib, sys
 
     sys.path.insert(0, root)
-    importlib.import_module(f"app.views.{module_name}").render()
+    importlib.import_module(f"app.ui.pages.{module_name}").render()
 
 
 at = AppTest.from_function(view_script, args=("academics", "/ruta/al/proyecto"))
@@ -87,7 +92,7 @@ print([e.label for e in at.expander])
 ### Pruebas en un navegador real (JavaScript)
 
 `AppTest` no ejecuta JavaScript ni permite hacer clic en un `st.expander`. Para lo que depende
-del navegador (el menú lateral que se expande con el mouse, `app/ui/sidebar_hover.js`, o abrir un
+del navegador (el menú lateral que se expande con el mouse, `app/ui/assets/sidebar_hover.js`, o abrir un
 expander a mano) se usa **Selenium con Firefox en modo headless**, instalado en un entorno
 virtual aparte para no agregarlo a las dependencias del proyecto:
 
@@ -137,7 +142,7 @@ probaron con Selenium contra los servicios reales:
   - Las relaciones que la vista necesita se cargan con `selectinload`.
 - **Vistas:**
   - Las lecturas se hacen dentro de `with session_scope() as s:`.
-  - Las escrituras pasan siempre por `common.run_action(lambda s: …, "mensaje")`.
+  - Las escrituras pasan siempre por `actions.run_action(lambda s: …, "mensaje")`.
   - Para modificar el usuario actual se usa `s.merge(user)`.
   - Dentro de un bucle, las lambdas capturan las variables por argumento por defecto
     (`lambda s, iid=item.id: …`).
@@ -148,14 +153,14 @@ probaron con Selenium contra los servicios reales:
 
 ### Agregar una página
 
-1. Crear `app/views/nueva.py` con una función `render()` que empiece con
-   `user = common.require_user()`.
+1. Crear `app/ui/pages/nueva.py` con una función `render()` que empiece con
+   `user = session.require_user()` (`from app.ui.components import session`).
 2. Registrarla en `app/main.py`, dentro del grupo correspondiente:
    `st.Page(nueva.render, title="…", icon="…", url_path="…")`.
 
 ### Agregar un campo a una tabla
 
-1. Agregar el `mapped_column` en `app/db/models.py`, con `default=`.
+1. Agregar el `mapped_column` en `app/database/models.py`, con `default=`.
 2. Actualizar el servicio (validación) y la vista.
 3. Recrear el esquema (`make reset-db`) o crear una migración, si ya se incorporó Alembic.
 4. Documentarlo en [Modelo de datos](06-modelo-de-datos.md).
@@ -165,13 +170,13 @@ probaron con Selenium contra los servicios reales:
 1. Agregar una entrada en `_rules()` de `app/services/challenge_rules.py`:
    `"codigo": Rule("Descripción", meta, lambda s, u: medida, "unidad")`.
 2. Para que sea un reto global por defecto, agregarlo a `GLOBAL_CHALLENGES` en
-   `app/db/init_db.py` y ejecutar `make init-db`, que inserta los retos que falten.
+   `app/database/seeds/base.py` y ejecutar `make init-db`, que inserta los retos que falten.
 3. También se puede crear desde la UI como admin: *Crear reto → Reto global → Verificación
    automática*.
 
 ### Agregar un nuevo tipo de error de dominio
 
-Agregar la clase a la tupla `USER_ERRORS` de `app/ui/common.py`. Así `run_action` la muestra como
+Agregar la clase a la tupla `USER_ERRORS` de `app/ui/components/actions.py`. Así `run_action` la muestra como
 mensaje en lugar de dejar que Streamlit muestre la traza del error.
 
 ### Agregar un programa al catálogo de pensum
