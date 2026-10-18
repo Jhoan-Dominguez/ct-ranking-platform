@@ -54,6 +54,9 @@ def _login_tab() -> None:
                     common.flash(f"¡Bienvenido, {name}!", "👋")
                 st.rerun()
 
+    if auth.google_login_enabled():
+        _google_button()
+
     pending = st.session_state.get(UNVERIFIED_LOGIN)
     if pending:
         st.warning(str(auth.EmailNotVerifiedError(pending)), icon="📧")
@@ -65,6 +68,22 @@ def _login_tab() -> None:
             login = st.text_input("Tu usuario o correo", key="resend_login")
             if st.button("Reenviar enlace", key="resend_btn"):
                 _resend(login)
+
+
+def _google_button() -> None:
+    domain = auth.student_domain()
+    st.markdown(
+        "<div style='text-align:center;opacity:.6;margin:.3rem 0'>— o —</div>",
+        unsafe_allow_html=True,
+    )
+    if error := st.session_state.get(common.OIDC_ERROR):
+        st.error(error)
+        if st.button("Usar otra cuenta de Google", width="stretch"):
+            common.logout()
+        return
+    if st.button("Continuar con Google", icon=":material/account_circle:", width="stretch"):
+        st.login("google")
+    st.caption(f"Sólo con tu cuenta institucional @{domain}. La primera vez se crea tu cuenta.")
 
 
 def _register_tab() -> None:

@@ -57,6 +57,7 @@ def pending_deletion_page(user) -> None:
 def main() -> None:
     start_background_purge()
     try:
+        common.sync_oidc_session()
         user = common.current_user()
     except OperationalError:
         st.error(

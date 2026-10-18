@@ -13,6 +13,7 @@ import base64
 import contextlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -455,6 +456,37 @@ def register(
     else:
         user.password_hash = hash_password(password)
     session.add(user)
+    session.flush()
+    return user
+
+
+def google_login_enabled() -> bool:
+    """«Continuar con Google» sólo se ofrece con Keycloak y credenciales de Google."""
+    return _uses_keycloak() and bool(get_settings().google_client_id)
+
+
+def login_with_oidc(session: Session, claims: Mapping[str, object]) -> User:
+    """Inicia sesión con los datos del token OIDC de Keycloak (``st.user``) tras volver de
+    Google. Keycloak ya restringe las cuentas al dominio institucional (``hostedDomain``); aquí se
+    vuelve a validar como segunda capa."""
+    email = str(claims.get("email") or "").strip().lower()
+    if not claims.get("sub") or not email:
+        raise AuthError("La respuesta de inicio de sesión no incluye un correo.")
+    if not claims.get("email_verified"):
+        raise AuthError("Google no confirmó tu correo electrónico.")
+    validate_student_email(email)
+    identity = Identity(
+        external_id=str(claims["sub"]),
+        username=str(claims.get("preferred_username") or email.split("@", 1)[0]),
+        email=email,
+        first_name=str(claims.get("given_name") or ""),
+        last_name=str(claims.get("family_name") or ""),
+        email_verified=True,
+    )
+    user = _sync_keycloak_user(session, identity)
+    if not user.is_active:
+        raise AuthError("La cuenta está deshabilitada. Contacta al administrador.")
+    user.last_login = datetime.now(UTC)
     session.flush()
     return user
 
