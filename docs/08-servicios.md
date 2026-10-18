@@ -32,10 +32,10 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | Módulo | Contenido |
 |--------|-----------|
 | `service.py` | API pública (lo que reexporta `app/auth/__init__.py`). |
-| `keycloak.py` | `KeycloakClient` e `Identity`: login por contraseña, API de administración, correos y credenciales OTP. |
+| `keycloak.py` | `KeycloakClient` e `Identity`: login por contraseña, API de administración, correos y credenciales OTP. `password_login(..., password_only=True)` usa el cliente `ct-ranking-pwcheck` (paso 1 del login), y `delete_broker_only_user` borra usuarios creados sólo por Google. |
 | `validation.py` | Usuario, correo, dominio institucional, nombres y contraseña. |
 | `passwords.py` | `hash_password` y `check_password` (bcrypt). |
-| `errors.py` | `AuthError`, `EmailNotVerifiedError` e `INVALID_LOGIN`. |
+| `errors.py` | `AuthError`, `EmailNotVerifiedError`, `AccountNotFoundError` (Google sin cuenta) e `INVALID_LOGIN`. |
 | `accounts.py` | Eliminación diferida (ver más abajo). |
 
 | Función | Descripción |

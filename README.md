@@ -48,8 +48,10 @@ Está construida con **Streamlit**, **PostgreSQL** y **Keycloak**.
 
 - **Correo institucional obligatorio** (`@estudiantes.areandina.edu.co`).
 - **Activación** de la cuenta con un enlace enviado por correo.
-- **Inicio de sesión con Google** para cuentas institucionales.
-- **2FA (TOTP)** con Google Authenticator, Microsoft Authenticator o FreeOTP.
+- **Crear cuenta / iniciar sesión con Google** para cuentas institucionales. Iniciar sesión sólo
+  funciona si la cuenta ya existe.
+- **2FA (TOTP)** con Google Authenticator, Microsoft Authenticator o FreeOTP. El código se pide
+  sólo después de una contraseña correcta.
 - Protección contra **fuerza bruta**.
 - **Eliminación diferida** con cancelación posible.
 
@@ -111,7 +113,7 @@ Más detalle en [`docs/04-arquitectura.md`](docs/04-arquitectura.md).
 | **Keycloak** (identidad) | http://localhost:8180 — realm `ct-ranking` | Usuarios, contraseñas, activación por correo, 2FA y Google. | Consola: `admin` / `admin` |
 | **Mailpit** (correo de desarrollo) | http://localhost:8025 (web) · `localhost:1025` (SMTP) | Atrapa y muestra todos los correos (activación, 2FA, códigos). | — |
 | **PostgreSQL 16** | `localhost:5432` | BD `ctranking` (app) y `keycloak` (Keycloak). | `ctranking` / `ctranking` |
-| **Google** (opcional) | `accounts.google.com` vía Keycloak | «Continuar con Google» para cuentas institucionales. | Credenciales OAuth en `.env` |
+| **Google** (opcional) | `accounts.google.com` vía Keycloak | «Crear cuenta con Google» e «Iniciar sesión con Google» (sólo cuentas existentes) para cuentas institucionales. | Credenciales OAuth en `.env` |
 
 **Dominios configurados:**
 

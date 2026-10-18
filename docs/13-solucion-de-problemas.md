@@ -24,11 +24,13 @@
 | «No fue posible enviar el correo…» | La app no pudo conectarse al SMTP (`SMTP_HOST:SMTP_PORT`). | `make ps` (contenedor `mailpit`) o revisa las credenciales del SMTP real. |
 | «Tu cuenta aún no está activada» | No se abrió el enlace de verificación. | Abre el correo «Verificación de email» o usa **Reenviar correo de activación**. |
 | El enlace de activación o de 2FA dice que expiró | El enlace tiene vigencia limitada (el de 2FA dura 12 horas). | Pide uno nuevo desde la app. |
-| «Usuario, contraseña o código de verificación incorrectos» con la contraseña correcta | La cuenta tiene 2FA y falta el código, o el código expiró o ya se usó. | Escribe el código actual de la app autenticadora. Si acabas de usarlo, espera al siguiente. |
+| «El código no es correcto o ya venció» (paso 2 del login) | El código de la app autenticadora expiró o ya se usó, o el reloj del celular está desfasado. | Escribe el código actual. Si acabas de usarlo, espera al siguiente. Revisa que la hora del celular sea automática. |
 | «Demasiados intentos fallidos…» | Protección contra fuerza bruta de Keycloak. | Espera un minuto. Un admin puede desbloquear en la consola de Keycloak (*Users → usuario*). |
 | Perdí el celular con el 2FA | La credencial OTP sigue activa. | Un admin la elimina en la consola de Keycloak (*Users → usuario → Credentials → OTP → Delete*). |
 | La cuenta no se borró al pasar los 7 días | La app no estaba en ejecución, y el hilo de purga sólo corre mientras lo está. | `make purge-accounts`, o prográmalo con cron. |
-| No aparece «Continuar con Google» | `GOOGLE_CLIENT_ID` está vacío o no se ejecutó `make up` / `make run` después de cambiar `.env`. | Configura las credenciales ([guía](15-inicio-sesion-con-google.md)) y ejecuta `make up && make run`. |
+| No aparecen los botones de Google | `GOOGLE_CLIENT_ID` está vacío o no se ejecutó `make up` / `make run` después de cambiar `.env`. | Configura las credenciales ([guía](15-inicio-sesion-con-google.md)) y ejecuta `make up && make run`. |
+| «No existe una cuenta en CT Ranking para …» al usar Google | Se usó «Iniciar sesión con Google» sin tener cuenta. | Pulsa **Crear cuenta con Google** (o usa la pestaña *Crear cuenta*). |
+| Error al pulsar un botón de Google tras cambiar `.env` | La app en ejecución todavía tiene la configuración anterior de `st.login`. | Detén la app y vuelve a ejecutar `make run`, que regenera `.streamlit/secrets.toml`. |
 | Google muestra `redirect_uri_mismatch` | La URI registrada en Google Cloud no coincide con la del *broker* de Keycloak. | Registra `<KEYCLOAK_URL>/realms/ct-ranking/broker/google/endpoint` en el cliente OAuth. |
 | «Debes usar tu correo institucional…» tras volver de Google | Se eligió una cuenta que no es `@estudiantes.areandina.edu.co`. | Pulsa «Usar otra cuenta de Google» y elige la cuenta institucional. |
 | Keycloak pide «vincular cuenta» la primera vez con Google | Ya existía una cuenta con ese correo, registrada con el formulario. | Confirma con la contraseña de esa cuenta (o con el enlace por correo). Queda vinculada. |

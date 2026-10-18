@@ -91,6 +91,11 @@ Package map:
   - `app/ui/assets/sidebar_hover.js` is injected once from `main.py` via `sidebar.enable_sidebar_hover()` (`st.html` with `unsafe_allow_javascript=True`).
   - It drives Streamlit's own expand and collapse buttons (`stExpandSidebarButton`, `stSidebarCollapseButton`) and reads `section[data-testid="stSidebar"][data-collapsed]`. Re-check these selectors after upgrading Streamlit.
   - AppTest does not run JS. To test it, use a real browser: headless Firefox needs `ui.primaryPointerCapabilities=6` to report a mouse.
+- **Two-step password login:**
+  - `auth.begin_login` first verifies the password through the `ct-ranking-pwcheck` client. That client is bound to the "direct grant - solo contraseña" flow, a copy without the OTP step, created by `configure_keycloak.py`.
+  - Only if the user has an OTP credential does the UI ask for the code. It then calls `auth.login(..., otp)` on the main client, where Keycloak validates it.
+  - The password waits in `st.session_state` for at most 5 minutes.
+  - This is needed because the main direct grant flow returns the same error for a wrong password and a missing OTP.
 - **Accounts, 2FA and moderation** (`docs/14-cuentas-seguridad-y-moderacion.md`):
   - Keycloak features: email activation uses `VERIFY_EMAIL` plus `send-verify-email`. TOTP setup uses `execute-actions-email ["CONFIGURE_TOTP"]`, and the code is passed as the `otp` param of the password grant.
   - Keycloak returns the same `invalid_grant` for a wrong password, a missing or wrong OTP, and a brute-force lock. Rapid failed attempts trigger the lock (`user_temporarily_disabled`), so space them out when testing.
@@ -100,7 +105,10 @@ Package map:
   - It uses `st.login("google")`, an OIDC Authorization Code flow against Keycloak. `authorize_params = {kc_idp_hint = "google"}` makes Keycloak jump straight to Google.
   - `.streamlit/secrets.toml` is generated from `.env` by `scripts/write_streamlit_secrets.py` (it is gitignored).
   - `scripts/configure_keycloak.py` creates the Google IdP (`hostedDomain` = institutional domain, username = email local part) only when `GOOGLE_CLIENT_ID` is set, and removes it otherwise.
-  - `session.sync_oidc_session()` maps `st.user` claims to a local user via `auth.login_with_oidc`, which re-validates the domain. The cookie keeps Google sessions across reloads.
+  - There are two identical `st.login` providers, `google` (sign in) and `googlesignup` (sign up). Streamlit forbids `_` in provider names. Streamlit stores the provider name in `st.user["provider"]`, and that is the only way to know the intent after the redirect.
+  - `session.sync_oidc_session()` calls `auth.login_with_oidc(..., allow_create=provider == "googlesignup")`, which re-validates the domain.
+  - Without `allow_create`, the account must already exist (matched by `keycloak_id` or email). Otherwise it raises `AccountNotFoundError` and deletes the broker-only user Keycloak just created.
+  - The cookie keeps Google sessions across reloads.
   - Requires `authlib` and `httpx`.
 - **Schema changes:** there is no Alembic. New tables come from `create_all`. New columns on existing tables must be added to `COLUMN_UPGRADES` in `app/database/init_db.py` (idempotent `ADD COLUMN IF NOT EXISTS`, Postgres only). Type changes or renames need `make reset-db`.
 

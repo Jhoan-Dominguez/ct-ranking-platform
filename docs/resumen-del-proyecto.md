@@ -218,8 +218,10 @@ intercambiables con `AUTH_PROVIDER`:
 - **Activación de cuentas por correo**, **2FA con QR**, **eliminación diferida de cuentas** con
   doble verificación, y **reportes y bloqueos** con gestión desde el panel de administrador.
 - Proveedor de autenticación **local** alternativo a Keycloak.
-- **Correo institucional obligatorio** (`@estudiantes.areandina.edu.co`) e **inicio de sesión con
-  Google** para cuentas institucionales (gratuito, vía Keycloak).
+- **Correo institucional obligatorio** (`@estudiantes.areandina.edu.co`). **Crear cuenta con
+  Google** e **iniciar sesión con Google** (esto último sólo si la cuenta ya existe) para cuentas
+  institucionales (gratuito, vía Keycloak).
+- **Login en dos pasos con 2FA:** el código se pide sólo después de verificar la contraseña.
 - **Datos de demostración** (`make seed-demo`). Ocho estudiantes de Ingeniería de Software en
   distintos niveles: recién ingresados (semestre 1), iniciando (2–3), a mitad de carrera (5–6) y
   a punto de terminar (8–9). Tienen historia académica completa con notas, materias repetidas y

@@ -58,7 +58,7 @@ make test                                                     # todas
 |---------|-------|
 | `test_academics.py` | Nota simple, ponderada y mixta; materia sin ítems; promedios ponderados por créditos y estados; CRUD de ítems con validación de escala y del 100 %; propiedad; **avance de créditos por categoría con materias repetidas**; **carga idempotente del pensum**; validación de categoría. |
 | `test_challenges.py` | Sólo un admin crea retos globales; orden del ranking y bonus del primero; visibilidad "sólo seguidores"; retos cerrados; reglas automáticas; un usuario antiguo completa al unirse. |
-| `test_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; dominio institucional y exención de administradores; login con Google (creación y vínculo de usuario, rechazo de otros dominios, de correos no verificados y de cuentas deshabilitadas); regresión del primer login desde Keycloak. |
+| `test_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; dominio institucional y exención de administradores; paso 1 del login (`begin_login`); Google: crear cuenta y luego iniciar sesión, iniciar sesión sin cuenta (rechazado), vínculo con una cuenta del formulario, rechazo de otros dominios, de correos no verificados y de cuentas deshabilitadas; regresión del primer login desde Keycloak. |
 | `test_users.py` | Alias único y límites de semestre del perfil. |
 | `test_social.py` | Seguir, dejar de seguir y mensajes de apoyo no leídos. |
 | `test_forum.py` | Flujo del foro y permisos (autor o admin). |
