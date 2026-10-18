@@ -1,6 +1,6 @@
 # 5. Autenticación
 
-El enunciado pide un *login básico*, opcionalmente con Keycloak. `app/services/auth.py`
+El enunciado pide un *login básico*, opcionalmente con Keycloak. `app/auth/service.py`
 implementa dos proveedores intercambiables con la variable `AUTH_PROVIDER`. Las vistas y el
 resto de servicios no saben cuál está activo: siempre llaman a las mismas funciones públicas.
 
@@ -14,6 +14,7 @@ resto de servicios no saben cuál está activo: siempre llaman a las mismas func
 | `change_email(session, user, email)` | Valida el correo, verifica que sea único y lo actualiza. |
 | `change_names(session, user, first_name, last_name)` | Actualiza nombre y apellido. |
 | `set_active(session, user, active)` | Habilita o deshabilita la cuenta. Lo usa el panel de administrador. |
+| `google_login_enabled()`, `login_with_oidc(session, claims)` | «Continuar con Google»: si está habilitado, y el login a partir de los *claims* OIDC de Keycloak (valida el dominio institucional y el correo verificado, y crea o vincula el usuario). |
 | `two_factor_supported()`, `two_factor_enabled(user)` | Indica si hay 2FA disponible (sólo con Keycloak) y si el usuario lo tiene activo. |
 | `request_two_factor_setup(user)` | Pide a Keycloak que envíe el correo con el enlace para configurar el 2FA (QR). El enlace dura 12 horas. |
 | `disable_two_factor(user, password, otp)` | Verifica la contraseña y el código, y borra las credenciales OTP en Keycloak. |
@@ -58,8 +59,8 @@ aplica `scripts/configure_keycloak.py` en cada `make up`:
 ```mermaid
 sequenceDiagram
     participant U as Usuario
-    participant L as views/login.py
-    participant A as services/auth.py
+    participant L as ui/pages/login.py
+    participant A as auth/service.py
     participant K as Keycloak
     participant DB as PostgreSQL (users)
 
@@ -138,6 +139,18 @@ de Keycloak. Se gestionan desde la consola: http://localhost:8180 → realm `ct-
 Ver el detalle completo en
 [Cuentas, seguridad y moderación](14-cuentas-seguridad-y-moderacion.md).
 
+### Inicio de sesión con Google (OIDC)
+
+Además del login por contraseña (*direct grant*), la app admite el flujo **Authorization Code**
+de OpenID Connect con `st.login("google")`:
+
+1. Keycloak recibe `kc_idp_hint=google` y redirige directo a Google.
+2. Google sólo acepta cuentas del dominio institucional (`hostedDomain`).
+3. Al volver, `auth.login_with_oidc` crea o vincula el usuario local.
+
+Con este método la sesión **persiste al recargar** la página, porque queda en una cookie firmada.
+Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md).
+
 ## Proveedor `local`
 
 Se activa con `AUTH_PROVIDER=local`. Lo usan las pruebas y sirve cuando no hay Keycloak.
@@ -166,7 +179,7 @@ Se activa con `AUTH_PROVIDER=local`. Lo usan las pruebas y sirve cuando no hay K
 ## Sesión en la interfaz
 
 - **Inicio de sesión exitoso:** se guarda `st.session_state["user_id"]`.
-- **En cada rerun:** `common.current_user()` recarga el usuario desde la BD. Si ya no existe o
+- **En cada rerun:** `session.current_user()` recarga el usuario desde la BD. Si ya no existe o
   fue deshabilitado, se borra `user_id` y se vuelve a mostrar el login.
 - **Cerrar sesión:** limpia todo `st.session_state`.
 - **Recargar el navegador:** crea una sesión nueva de Streamlit, así que hay que volver a
