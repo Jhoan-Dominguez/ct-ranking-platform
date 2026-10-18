@@ -68,7 +68,7 @@ las variables de entorno del contenedor.
 | `make create` | `.env`, dependencias en `.venv` e instalación de los hooks de pre-commit. |
 | `make env` | Crea `.env` desde `.env.example` si no existe. |
 | `make install` | Instala o actualiza las dependencias de `requirements-dev.txt`. |
-| `make up` | Levanta los contenedores, espera a que estén listos, configura Keycloak (`scripts/configure_keycloak.py`: SMTP, URLs y proveedor Google), genera `.streamlit/secrets.toml` y ejecuta `init_db`. |
+| `make up` | Levanta los contenedores, espera a que estén listos, configura Keycloak (`scripts/configure_keycloak.py`: SMTP, URLs, cliente de verificación de contraseña y proveedor Google), genera `.streamlit/secrets.toml` y ejecuta `init_db`. |
 | `make run` | Genera `.streamlit/secrets.toml` y ejecuta Streamlit en `APP_PORT` (por defecto 8501). |
 | `make dev` | `make up` + `make run`. |
 | `make down` | Detiene y elimina los contenedores. **Conserva** los volúmenes (datos). |

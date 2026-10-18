@@ -11,7 +11,7 @@ Revisado en el realm `ct-ranking` (Keycloak 26.4):
 |-----------|------------------|------------------|
 | Activar la cuenta por correo | ✅ Sí, con un **enlace** (acción requerida `VERIFY_EMAIL`) | La cuenta se crea pendiente de verificación y Keycloak envía el enlace. Un **código** por correo no es nativo en Keycloak, así que se eligió el enlace. |
 | 2FA con QR (TOTP) | ✅ Sí, **sin servicios externos** (`CONFIGURE_TOTP`, política TOTP de 6 dígitos cada 30 s, HmacSHA1) | Keycloak muestra el QR en su página y valida el código en cada login. Compatible con Google Authenticator, Microsoft Authenticator y FreeOTP. |
-| Exigir el código al iniciar sesión | ✅ Sí: el flujo *direct grant* del realm incluye **«Conditional OTP»** | La app envía el código en el parámetro `otp` del login. |
+| Exigir el código al iniciar sesión | ✅ Sí: el flujo *direct grant* del realm incluye **«Conditional OTP»** | La app envía el código en el parámetro `otp` del login. Para pedir el código sólo después de una contraseña correcta, se agrega un cliente con un flujo sin OTP (ver abajo). |
 | Otras opciones de Keycloak (no usadas) | Códigos de recuperación (`CONFIGURE_RECOVERY_AUTHN_CODES`), llaves de seguridad y passkeys (WebAuthn) | Se pueden habilitar más adelante. Requieren el flujo de login del navegador. |
 | Eliminar la cuenta | ⚠️ Keycloak tiene `delete_account`, pero **borra al instante** | La espera de 7 días, la doble verificación y la cancelación son lógica de la app. Al vencer el plazo, la app borra al usuario también en Keycloak. |
 | Enviar correos | ❌ Necesita un **servidor SMTP** | En desarrollo, **Mailpit** (contenedor). En producción, cualquier SMTP real. |
@@ -101,15 +101,48 @@ sequenceDiagram
    muestra el **código QR**, y también la clave en texto si no se puede escanear.
 3. **Escanea el QR con su app autenticadora** y escribe en esa página el código de 6 dígitos para
    confirmar. Puede ponerle un nombre al dispositivo (por ejemplo, «Celular»).
-4. **Desde entonces, al iniciar sesión** escribe también el **«Código de verificación (2FA)»**.
+4. **Desde entonces, al iniciar sesión**, tras escribir usuario y contraseña, la app le pide el
+   **código de verificación**.
 
 ### Inicio de sesión con 2FA
 
-- El formulario de login siempre muestra el campo opcional «Código de verificación (2FA)». La
-  app lo envía a Keycloak como `otp`.
-- Keycloak responde con el **mismo mensaje** en todos estos casos: contraseña incorrecta, código
-  incorrecto, código faltante o cuenta bloqueada por intentos fallidos. Por eso la app muestra
-  «Usuario, contraseña o código de verificación incorrectos».
+El login tiene **dos pasos**, y el código sólo se pide cuando hace falta:
+
+```mermaid
+sequenceDiagram
+    participant U as Estudiante
+    participant A as App
+    participant P as Keycloak · cliente ct-ranking-pwcheck<br/>(flujo sin OTP)
+    participant K as Keycloak · cliente ct-ranking-app<br/>(flujo con OTP)
+    U->>A: Paso 1: usuario/correo + contraseña
+    A->>P: token (password) — sólo verifica la contraseña
+    alt contraseña incorrecta
+        P-->>A: 401 → «Usuario o contraseña incorrectos»
+    else correcta
+        A->>K: ¿el usuario tiene credencial OTP? (admin API)
+        alt sin 2FA
+            A->>K: login normal → entra
+        else con 2FA
+            A-->>U: Paso 2: «Verificación en dos pasos» → código
+            U->>A: código de 6 dígitos
+            A->>K: token (password + otp) → Keycloak valida el código
+            K-->>A: OK → entra · o 401 → «El código no es correcto o ya venció»
+        end
+    end
+```
+
+- **Por qué hay un segundo cliente.** El flujo *direct grant* del realm responde **lo mismo**
+  ante una contraseña incorrecta y ante un código faltante.
+  - Por eso `scripts/configure_keycloak.py` crea el flujo **«direct grant - solo contraseña»**:
+    una copia sin el paso *Conditional OTP*.
+  - Ese flujo lo usa el cliente **`ct-ranking-pwcheck`**, cuyos tokens duran 60 s y se descartan.
+  - El ingreso real (paso 2) siempre pasa por el cliente principal, donde **Keycloak valida el
+    código**.
+- **Datos entre pasos.** Entre el paso 1 y el 2, el usuario y la contraseña quedan sólo en la
+  memoria de la sesión del servidor (`st.session_state`), como máximo **5 minutos**. Se borran
+  al entrar, al pulsar «Volver» o al vencer el plazo.
+- **Mensajes:** «Usuario o contraseña incorrectos» (paso 1) y «El código no es correcto o ya
+  venció» (paso 2).
 - La única excepción es el bloqueo temporal por **fuerza bruta**. Ese estado se consulta aparte
   (`GET /attack-detection/brute-force/users/{id}`) y se muestra un mensaje claro: «espera un
   minuto».

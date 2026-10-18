@@ -100,6 +100,7 @@ prioridad sobre las de `.env`.
 | `KEYCLOAK_REALM` | `ct-ranking` | app | Realm de la plataforma. |
 | `KEYCLOAK_CLIENT_ID` | `ct-ranking-app` | app | Cliente confidencial usado por la app. |
 | `KEYCLOAK_CLIENT_SECRET` | `ct-ranking-dev-secret` | app, keycloak | Secreto del cliente. Se inyecta en el realm al importarlo. |
+| `KEYCLOAK_PWCHECK_CLIENT_ID` / `KEYCLOAK_PWCHECK_CLIENT_SECRET` | `ct-ranking-pwcheck` / `ct-ranking-pwcheck-dev-secret` | app, Keycloak | Cliente que sólo verifica usuario y contraseña (paso 1 del login con 2FA). Lo crea `configure_keycloak.py`. |
 | `KEYCLOAK_ADMIN` | `admin` | keycloak | Usuario de la **consola** de Keycloak (realm `master`). |
 | `KEYCLOAK_ADMIN_PASSWORD` | `admin` | keycloak | Contraseña de la consola de Keycloak. |
 | `APP_ADMIN_USERNAME` | `admin` | app, keycloak | Usuario administrador de **la plataforma**. |

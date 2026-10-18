@@ -8,7 +8,7 @@ Componentes compartidos (`app/ui/components/`):
 
 | Módulo | Funciones | Uso |
 |--------|-----------|-----|
-| `session.py` | `current_user()`, `require_user()`, `logout()`, `sync_oidc_session()` | Recargan el usuario autenticado (si no hay sesión, detienen el render), cierran la sesión (también la de Google/Keycloak) y vinculan la sesión de «Continuar con Google». |
+| `session.py` | `current_user()`, `require_user()`, `logout()`, `sync_oidc_session()` | Recargan el usuario autenticado (si no hay sesión, detienen el render), cierran la sesión (también la de Google/Keycloak) y, al volver de Google, inician sesión o crean la cuenta según el botón usado (proveedores `google` / `googlesignup`). |
 | `actions.py` | `run_action(fn, mensaje)`, `flash()`, `show_flashes()`, `USER_ERRORS` | Ejecuta una escritura en su propia transacción (ver [Persistencia](07-persistencia.md#escritura-actionsrun_action)). Los avisos tipo *toast* sobreviven al rerun. |
 | `formatting.py` | `fmt_grade()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, fechas (zona horaria local) y etiquetas de categoría. |
 | `widgets.py` | `avatar_html()`, `user_chip()`, `institutional_email_input()` | Foto o iniciales, nombre visible y `@usuario`. Campo de correo con el dominio institucional fijo. |
@@ -43,14 +43,17 @@ Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 
 | Pestaña | Campos | Acción |
 |---------|--------|--------|
-| Iniciar sesión | Usuario o correo, contraseña y **código de verificación (2FA)**, que es opcional y sólo se usa si el usuario lo activó | `auth.login` → guarda `user_id` en la sesión y muestra «¡Bienvenido…!». |
+| Iniciar sesión | **Paso 1:** usuario o correo y contraseña. **Paso 2** (sólo si la cuenta tiene 2FA): «Verificación en dos pasos» con el código de la app autenticadora y el botón «← Volver». | `auth.begin_login`: si no hay 2FA entra directo; si hay 2FA, pasa al paso 2 y `auth.login` con el código. Al entrar guarda `user_id` y muestra «¡Bienvenido…!». |
 | Crear cuenta | Nombre, apellido, usuario, **correo institucional** (sólo la parte antes de la @; el dominio `@estudiantes.areandina.edu.co` es fijo) y contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register`. Con Keycloak aparece «Te enviamos un enlace de activación a …». |
 
-- **Continuar con Google** (sólo si `GOOGLE_CLIENT_ID` está configurado): debajo del formulario.
-  - Lleva a Google a través de Keycloak y sólo acepta cuentas `@estudiantes.areandina.edu.co`.
-  - Si la cuenta elegida no es institucional, muestra el error y el botón «Usar otra cuenta de
-    Google».
-  - Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md).
+- **Google** (sólo si `GOOGLE_CLIENT_ID` está configurado):
+  - **«Iniciar sesión con Google»** (pestaña *Iniciar sesión*) entra sólo si la cuenta ya existe.
+    Si no existe, aparece «No existe una cuenta… Créala primero» con los botones **Crear cuenta
+    con Google** y **Usar otra cuenta de Google**.
+  - **«Crear cuenta con Google»** (pestaña *Crear cuenta*) crea la cuenta con el nombre y el
+    correo de Google.
+  - Ambos sólo aceptan cuentas `@estudiantes.areandina.edu.co`. Ver
+    [Inicio de sesión con Google](15-inicio-sesion-con-google.md).
 - **Cuenta sin activar.** Si alguien intenta entrar sin haber activado la cuenta, aparece «Tu
   cuenta aún no está activada» con el botón **Reenviar correo de activación**.
 - **Reenvío sin intento de login.** El expander «¿No recibiste el correo de activación?» permite

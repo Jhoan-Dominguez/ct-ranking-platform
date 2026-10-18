@@ -6,7 +6,8 @@ resto de servicios no saben cuál está activo: siempre llaman a las mismas func
 
 | Función pública | Descripción |
 |-----------------|-------------|
-| `login(session, username, password, otp=None) -> User` | Valida las credenciales (y el código 2FA en `otp`), sincroniza el usuario local, actualiza `last_login` y verifica que la cuenta esté activa. Acepta usuario **o** correo. Lanza `EmailNotVerifiedError` si la cuenta no se activó. |
+| `begin_login(session, username, password) -> User \| None` | **Paso 1 del login:** verifica usuario y contraseña con el cliente `ct-ranking-pwcheck`, sin pedir OTP. Si la cuenta no tiene 2FA, completa el login y devuelve el usuario; si tiene 2FA, devuelve `None` y la UI pide el código. |
+| `login(session, username, password, otp=None) -> User` | Login completo (paso 2 cuando hay 2FA): valida las credenciales y el código 2FA en `otp`, sincroniza el usuario local, actualiza `last_login` y verifica que la cuenta esté activa. Acepta usuario **o** correo. Lanza `EmailNotVerifiedError` si la cuenta no se activó. |
 | `register(session, *, username, email, password, first_name, last_name, role=student, require_verification=True) -> User` | Valida los datos y verifica que el usuario y el correo sean únicos. Con Keycloak, la cuenta queda pendiente de activación y se envía el enlace al correo. |
 | `resend_verification(login)` | Reenvía el enlace de activación. No revela si la cuenta existe. |
 | `verify_credentials(user, password, otp=None)` | Re-autenticación para acciones sensibles (eliminar la cuenta, desactivar el 2FA). |
@@ -14,7 +15,7 @@ resto de servicios no saben cuál está activo: siempre llaman a las mismas func
 | `change_email(session, user, email)` | Valida el correo, verifica que sea único y lo actualiza. |
 | `change_names(session, user, first_name, last_name)` | Actualiza nombre y apellido. |
 | `set_active(session, user, active)` | Habilita o deshabilita la cuenta. Lo usa el panel de administrador. |
-| `google_login_enabled()`, `login_with_oidc(session, claims)` | «Continuar con Google»: si está habilitado, y el login a partir de los *claims* OIDC de Keycloak (valida el dominio institucional y el correo verificado, y crea o vincula el usuario). |
+| `google_login_enabled()`, `login_with_oidc(session, claims, *, allow_create=False) -> (User, creado)` | Google: si está habilitado, y el ingreso a partir de los *claims* OIDC de Keycloak. Valida el dominio institucional y el correo verificado. Sin `allow_create` exige que la cuenta exista (`AccountNotFoundError`, y borra el usuario huérfano en Keycloak); con `allow_create` la crea. |
 | `two_factor_supported()`, `two_factor_enabled(user)` | Indica si hay 2FA disponible (sólo con Keycloak) y si el usuario lo tiene activo. |
 | `request_two_factor_setup(user)` | Pide a Keycloak que envíe el correo con el enlace para configurar el 2FA (QR). El enlace dura 12 horas. |
 | `disable_two_factor(user, password, otp)` | Verifica la contraseña y el código, y borra las credenciales OTP en Keycloak. |
@@ -44,6 +45,7 @@ Keycloak importa el archivo `docker/keycloak/ct-ranking-realm.json` en el primer
 | Cuenta de servicio del cliente | Roles de cliente `realm-management`: `manage-users`, `view-users`, `query-users`. |
 | Usuario administrador | `${APP_ADMIN_USERNAME}` con correo y contraseña de `.env`, roles `admin` y `student`, correo verificado. |
 | Flujo *direct grant* (por defecto en Keycloak) | Usuario → contraseña → **«Conditional OTP»**: si el usuario tiene 2FA, exige el código en el parámetro `otp`. |
+| Flujo «direct grant - solo contraseña» y cliente `ct-ranking-pwcheck` | Copia del flujo sin el paso OTP, asociada a un cliente confidencial cuyos tokens duran 60 s. Sirve para el paso 1 del login: comprobar la contraseña antes de pedir el código 2FA. Lo crea `configure_keycloak.py`. |
 | Protección contra fuerza bruta | Activa. Varios intentos fallidos seguidos bloquean temporalmente la cuenta. |
 
 Lo que depende del entorno no está en el JSON, porque éste sólo se importa la primera vez. Lo
@@ -146,7 +148,9 @@ de OpenID Connect con `st.login("google")`:
 
 1. Keycloak recibe `kc_idp_hint=google` y redirige directo a Google.
 2. Google sólo acepta cuentas del dominio institucional (`hostedDomain`).
-3. Al volver, `auth.login_with_oidc` crea o vincula el usuario local.
+3. Al volver, `auth.login_with_oidc`:
+   - con «Crear cuenta con Google» (proveedor `googlesignup`), crea la cuenta si no existe;
+   - con «Iniciar sesión con Google» (proveedor `google`), sólo entra si ya existe.
 
 Con este método la sesión **persiste al recargar** la página, porque queda en una cookie firmada.
 Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md).
