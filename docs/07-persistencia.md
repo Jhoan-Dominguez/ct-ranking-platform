@@ -2,7 +2,7 @@
 
 ## Conexión
 
-`app/db/session.py` administra un único motor (`Engine`) global por proceso:
+`app/database/session.py` administra un único motor (`Engine`) global por proceso:
 
 ```python
 configure(url=None)  # crea el motor: create_engine(url, pool_pre_ping=True)
@@ -59,11 +59,11 @@ cargadas:
 with session_scope() as s:
     subjects = academics.list_subjects(s, user.id)
     summary = academics.summarize(subjects, user.current_semester)
-    st.metric("Promedio general", common.fmt_grade(summary.general_average))
+    st.metric("Promedio general", formatting.fmt_grade(summary.general_average))
     ...
 ```
 
-### Escritura: `common.run_action`
+### Escritura: `actions.run_action`
 
 ```python
 def run_action(fn, success=None, rerun=True):
@@ -96,7 +96,7 @@ def run_action(fn, success=None, rerun=True):
 | Foto de perfil | `users.avatar` (`bytea`) | PNG de 256×256 generado con Pillow: se recorta al centro en cuadrado, se redimensiona y se convierte a RGBA. La imagen original **no** se guarda. Límite de subida: 5 MB. En la UI se muestra como `data:image/png;base64,…`. |
 | Avatar por defecto | (no se guarda) | SVG con las iniciales, generado al vuelo. El color sale del hash MD5 del username. |
 | Plan de estudios | `users` (`program`, `study_plan`, `current_semester`, `total_semesters`) + `subjects` | |
-| Pensum del catálogo | Código: `app/data/pensums.py` | Al "cargar pensum" se copian las materias a `subjects` como `pendiente`. |
+| Pensum del catálogo | Código: `app/database/seeds/pensums.py` | Al "cargar pensum" se copian las materias a `subjects` como `pendiente`. |
 | Notas | `grade_items.grade` (float), `weight` (float o NULL) | Escala configurable. |
 | Promedios, créditos y ranking | **No se guardan** | Se calculan en cada consulta a partir de las tablas base (ver [reglas](10-reglas-de-negocio.md)). |
 | Etiquetas del foro | `posts.tags` | Texto separado por comas, en minúsculas. |
@@ -122,7 +122,7 @@ def run_action(fn, success=None, rerun=True):
 
 ## Creación del esquema
 
-`python -m app.db.init_db` (lo ejecuta `make up` o `make init-db`):
+`python -m app.database.init_db` (lo ejecuta `make up` o `make init-db`):
 
 1. `Base.metadata.create_all(engine)`: crea las tablas, índices y restricciones que **no
    existan**. No modifica las tablas existentes.
@@ -130,7 +130,7 @@ def run_action(fn, success=None, rerun=True):
    `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` que agregan a tablas existentes las columnas
    nuevas (`users.email_verified`, `deletion_requested_at`, `deletion_scheduled_for`), sin
    perder datos.
-2. `seed_base()`:
+2. `seed_base()` (`app/database/seeds/base.py`):
    - Crea o actualiza el usuario `APP_ADMIN_USERNAME` con rol `admin`, más el hash local si
      `AUTH_PROVIDER=local`.
    - Inserta los retos globales que falten, identificados por su `rule`.
@@ -146,7 +146,7 @@ El proyecto **no usa una herramienta de migraciones**:
 
 - **Tablas nuevas:** las crea `create_all`.
 - **Columnas nuevas en tablas existentes:** se agregan a la lista `COLUMN_UPGRADES` de
-  `app/db/init_db.py` y se aplican con `make init-db` (o `make up`). Así se agregaron las columnas
+  `app/database/init_db.py` y se aplican con `make init-db` (o `make up`). Así se agregaron las columnas
   de activación y de eliminación de cuentas.
 - **Cambios de tipo, renombres o borrados de columnas:** requieren `make reset-db`. Así se agregó,
   en su momento, `subjects.category`.
@@ -156,7 +156,7 @@ Para conservar los datos en entornos reales se recomienda incorporar **Alembic**
 ```bash
 .venv/bin/pip install alembic
 .venv/bin/alembic init migrations
-# en migrations/env.py: target_metadata = app.db.models.Base.metadata
+# en migrations/env.py: target_metadata = app.database.models.Base.metadata
 .venv/bin/alembic revision --autogenerate -m "baseline"
 .venv/bin/alembic upgrade head
 ```

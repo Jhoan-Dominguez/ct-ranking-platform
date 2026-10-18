@@ -33,7 +33,7 @@ Están fijadas (versión exacta) en dos archivos:
 
 | Archivo | Paquetes | Uso |
 |---------|----------|-----|
-| `requirements.txt` | `streamlit`, `SQLAlchemy`, `psycopg[binary]`, `bcrypt`, `requests`, `python-dotenv`, `pandas`, `plotly`, `pillow` | Ejecución de la aplicación. |
+| `requirements.txt` | `streamlit`, `SQLAlchemy`, `psycopg[binary]`, `bcrypt`, `requests`, `python-dotenv`, `pandas`, `plotly`, `pillow`, `authlib`, `httpx` | Ejecución de la aplicación. `authlib` y `httpx` los usa `st.login` (inicio de sesión con Google). |
 | `requirements-dev.txt` | Lo anterior + `pytest`, `ruff`, `isort`, `pre-commit` | Desarrollo, pruebas y calidad de código. |
 
 El entorno virtual vive en `.venv/` (ya existía en el proyecto). Todas las dependencias se
@@ -73,15 +73,16 @@ Detalle de lo que hace cada paso:
    - `scripts/configure_keycloak.py`: aplica al realm el servidor SMTP (para los correos de
      activación y de 2FA) y las URLs de la app. Usa las credenciales de la consola
      (`KEYCLOAK_ADMIN`) y es idempotente.
-   - `python -m app.db.init_db`: crea las tablas que falten, agrega las columnas nuevas a las
+   - `python -m app.database.init_db`: crea las tablas que falten, agrega las columnas nuevas a las
      tablas existentes, el usuario administrador local y los 10 retos globales. Es idempotente.
-3. **`make seed-demo`** ejecuta `python -m app.db.init_db --demo`. Ver
+3. **`make seed-demo`** ejecuta `python -m app.database.init_db --demo`. Ver
    [Datos iniciales y demo](11-datos-iniciales-y-demo.md).
-4. **`make run`** ejecuta `streamlit run app/main.py --server.port $APP_PORT`.
+4. **`make run`** genera `.streamlit/secrets.toml` (configuración de `st.login`, con
+   `scripts/write_streamlit_secrets.py`) y ejecuta `streamlit run app/main.py --server.port $APP_PORT`.
 
 ## Variables de entorno (`.env`)
 
-`app/config.py` lee el archivo `.env` con `python-dotenv`. `docker compose` también lo lee
+`app/core/config.py` lee el archivo `.env` con `python-dotenv`. `docker compose` también lo lee
 para configurar los contenedores. Las variables definidas en el entorno del sistema tienen
 prioridad sobre las de `.env`.
 
@@ -118,6 +119,8 @@ prioridad sobre las de `.env`.
 | `MAIL_BACKEND` | `smtp` | app | `smtp` envía correos; `memory` los guarda en memoria (pruebas). |
 | `ACCOUNT_DELETION_DAYS` | `7` | app | Días de espera antes de borrar definitivamente una cuenta. |
 | `STUDENT_EMAIL_DOMAIN` | `estudiantes.areandina.edu.co` | app | Dominio obligatorio del correo de los **estudiantes** (registro y cambio de correo). Los administradores están exentos. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(vacío)* | Keycloak (vía `configure_keycloak.py`) | Credenciales OAuth de Google Cloud. Vacío = sin «Continuar con Google». Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md). |
+| `AUTH_COOKIE_SECRET` | *(vacío → aleatorio)* | app (`secrets.toml`) | Secreto para firmar la cookie de sesión de `st.login`. Si queda vacío, se genera uno y se conserva en `.streamlit/secrets.toml`. |
 
 > ⚠️ Hay **dos administradores distintos**. `KEYCLOAK_ADMIN` sirve para entrar a la consola de
 > Keycloak (http://localhost:8180). `APP_ADMIN_USERNAME` sirve para entrar a la plataforma

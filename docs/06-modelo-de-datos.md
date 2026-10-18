@@ -1,6 +1,6 @@
 # 6. Modelo de datos
 
-Los modelos están en `app/db/models.py` y usan el estilo declarativo tipado de SQLAlchemy 2.0
+Los modelos están en `app/database/models.py` y usan el estilo declarativo tipado de SQLAlchemy 2.0
 (`Mapped[...]`, `mapped_column`). Todas las tablas están en la base `ctranking`, esquema `public`.
 
 ## Diagrama entidad-relación

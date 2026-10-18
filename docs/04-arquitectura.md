@@ -24,32 +24,34 @@
 
 ```mermaid
 flowchart TB
-    subgraph UI["Interfaz (Streamlit)"]
-        main["app/main.py<br/>navegación, sidebar, sesión"]
-        views["app/views/*<br/>una página por módulo"]
-        ui["app/ui/common.py<br/>componentes y run_action"]
+    subgraph UI["app/ui · Interfaz (Streamlit)"]
+        main["app/main.py<br/>navegación y sesión"]
+        pages["pages/*<br/>una página por archivo"]
+        components["components/*<br/>sesión, acciones, widgets,<br/>gráficas, rankings"]
     end
-    subgraph Dominio["Lógica de negocio"]
-        services["app/services/*<br/>auth, users, forum, social,<br/>academics, challenges, challenge_rules, admin"]
-        data["app/data/pensums.py<br/>catálogo de pensum"]
+    subgraph Auth["app/auth · Identidad"]
+        authsvc["service · keycloak<br/>validation · accounts"]
     end
-    subgraph Datos["Persistencia"]
-        models["app/db/models.py<br/>modelos ORM"]
-        session["app/db/session.py<br/>motor y transacciones"]
-        init["app/db/init_db.py · demo_data.py<br/>esquema y datos iniciales"]
+    subgraph Dominio["app/services · Lógica de negocio"]
+        services["academics · challenges · forum<br/>social · users · moderation · admin"]
     end
-    config["app/config.py (.env)"]
-    main --> views --> ui
-    views --> services
-    ui --> services
+    subgraph Datos["app/database · Persistencia"]
+        models["models · session"]
+        seeds["init_db · seeds<br/>(base, demo, pensums)"]
+    end
+    core["app/core<br/>config · mailer"]
+    main --> pages --> components
+    pages --> services
+    pages --> authsvc
+    components --> services
     services --> models
-    services --> data
-    views --> session
-    ui --> session
-    session --> pg[(PostgreSQL)]
-    services -. auth .-> kc[Keycloak]
-    config -.-> session
-    config -.-> services
+    authsvc --> models
+    seeds --> models
+    models --> pg[(PostgreSQL)]
+    authsvc -. HTTP .-> kc[Keycloak]
+    core -.-> authsvc
+    core -.-> services
+    core -. SMTP .-> mail[Mailpit / SMTP]
 ```
 
 **Principios de diseño:**
@@ -58,14 +60,16 @@ flowchart TB
    - Todas las funciones de `app/services/` reciben una `Session` de SQLAlchemy como primer
      argumento y lanzan excepciones de dominio con mensajes en español.
    - Así son fáciles de probar (las pruebas usan SQLite) y reutilizables desde scripts como
-     `init_db` y `demo_data`.
-2. **Las vistas sólo orquestan.**
+     `init_db` y `seeds/demo.py`.
+2. **Las páginas sólo orquestan.**
    - Leen datos a través de los servicios dentro de un bloque `with session_scope()` y
      dibujan la interfaz.
-   - Las escrituras pasan siempre por `common.run_action`.
-3. **La configuración se centraliza** en `app/config.py` (`get_settings()`, en caché con
+   - Las escrituras pasan siempre por `actions.run_action` (`app/ui/components/actions.py`).
+3. **La autenticación es un paquete propio** (`app/auth`): las páginas y servicios usan su
+   API pública (`from app import auth`; `auth.login(...)`) sin conocer a Keycloak.
+4. **La configuración se centraliza** en `app/core/config.py` (`get_settings()`, en caché con
    `lru_cache`).
-4. **Los datos de referencia viven en código.** El catálogo del pensum (`app/data/pensums.py`)
+5. **Los datos de referencia viven en código.** El catálogo del pensum (`app/database/seeds/pensums.py`)
    y las reglas de retos (`app/services/challenge_rules.py`) están versionados con el código.
 
 ## Estructura de carpetas
@@ -73,48 +77,65 @@ flowchart TB
 ```
 ct-ranking-platform/
 ├── app/
-│   ├── main.py                 # Entrada de Streamlit: navegación y control de sesión
-│   ├── config.py               # Settings desde .env
-│   ├── data/
-│   │   └── pensums.py          # Catálogo de pensum (Ingeniería de Software)
-│   ├── db/
-│   │   ├── models.py           # Modelos ORM y enumeraciones
-│   │   ├── session.py          # Motor, sessionmaker y session_scope()
-│   │   ├── init_db.py          # CLI: crea el esquema y los datos base (--reset, --demo)
-│   │   └── demo_data.py        # Datos de demostración
-│   ├── services/               # Lógica de negocio (sin Streamlit)
-│   │   ├── auth.py             # Login, registro, contraseñas; Keycloak o local
-│   │   ├── users.py            # Perfil, avatar y búsqueda
-│   │   ├── forum.py            # Publicaciones, comentarios, "me gusta"
-│   │   ├── social.py           # Seguidores y mensajes de apoyo
-│   │   ├── academics.py        # Materias, ítems, promedios, créditos, pensum
-│   │   ├── challenges.py       # Retos, participación, ranking, leaderboard
-│   │   ├── challenge_rules.py  # Reglas de verificación automática
-│   │   ├── admin.py            # Métricas y consultas del panel
-│   │   ├── accounts.py         # Eliminación diferida de cuentas con doble verificación
-│   │   ├── moderation.py       # Bloqueos y reportes
-│   │   └── mailer.py           # Envío de correos (SMTP o memoria)
-│   ├── ui/
-│   │   ├── common.py           # Sesión del usuario, run_action, avatares, banners
-│   │   ├── moderation.py       # Diálogos y menú «Más» para reportar y bloquear
-│   │   └── sidebar_hover.js    # Expande el menú lateral oculto al pasar el mouse
+│   ├── main.py                     # Entrada de Streamlit: navegación, sesión y tarea de purga
+│   ├── core/                       # Transversal
+│   │   ├── config.py               #   Settings desde .env (get_settings)
+│   │   └── mailer.py               #   Envío de correos (SMTP o memoria)
+│   ├── database/                   # Persistencia
+│   │   ├── models.py               #   Modelos ORM y enumeraciones
+│   │   ├── session.py              #   Motor, sessionmaker y session_scope()
+│   │   ├── init_db.py              #   CLI: esquema, columnas nuevas y datos base (--reset, --demo)
+│   │   └── seeds/                  #   Datos de referencia
+│   │       ├── base.py             #     Administrador y 10 retos globales
+│   │       ├── demo.py             #     Datos de demostración (make seed-demo)
+│   │       └── pensums.py          #     Catálogo de pensum (Ingeniería de Software)
+│   ├── auth/                       # Autenticación e identidad
+│   │   ├── service.py              #   API pública: login, registro, 2FA, Google, cambios de cuenta
+│   │   ├── keycloak.py             #   Cliente HTTP de Keycloak (tokens y API de administración)
+│   │   ├── validation.py           #   Usuario, correo institucional, nombres y contraseña
+│   │   ├── passwords.py            #   Hash bcrypt (proveedor local)
+│   │   ├── errors.py               #   AuthError, EmailNotVerifiedError
+│   │   └── accounts.py             #   Eliminación diferida de cuentas y purga
+│   ├── services/                   # Lógica de negocio por dominio (sin Streamlit)
+│   │   ├── academics.py            #   Materias, ítems, promedios, créditos, carga de pensum
+│   │   ├── challenges.py           #   Retos, participación, ranking, leaderboard
+│   │   ├── challenge_rules.py      #   Reglas de verificación automática
+│   │   ├── forum.py                #   Publicaciones, comentarios, "me gusta"
+│   │   ├── social.py               #   Seguidores y mensajes de apoyo
+│   │   ├── users.py                #   Perfil, avatar y búsqueda
+│   │   ├── moderation.py           #   Bloqueos y reportes
+│   │   └── admin.py                #   Métricas y consultas del panel
 │   ├── jobs/
-│   │   └── purge_accounts.py   # Purga de cuentas vencidas (hilo y CLI)
-│   └── views/                  # Una página por archivo: render()
-│       ├── login.py  home.py  forum.py  academics.py  challenges.py
-│       └── community.py  messages.py  profile.py  admin.py
+│   │   └── purge_accounts.py       # Purga de cuentas vencidas (hilo y CLI)
+│   └── ui/                         # Interfaz Streamlit
+│       ├── pages/                  #   Una página por archivo, con render()
+│       │   ├── login.py  home.py  forum.py  academics.py  challenges.py
+│       │   └── community.py  messages.py  profile.py  admin.py  account_pending.py
+│       ├── components/             #   Piezas reutilizables
+│       │   ├── session.py          #     Usuario actual, logout, sesión OIDC (Google)
+│       │   ├── actions.py          #     run_action, avisos (flash) y errores de dominio
+│       │   ├── formatting.py       #     Formato de notas, fechas y categorías
+│       │   ├── widgets.py          #     Avatares, chip de usuario, campo de correo institucional
+│       │   ├── charts.py           #     Avance de créditos y evolución del promedio
+│       │   ├── rankings.py         #     Banners de ranking por reto y general
+│       │   ├── moderation.py       #     Menú «Más» y diálogos de reportar y bloquear
+│       │   └── sidebar.py          #     Menú lateral que se expande con el mouse
+│       └── assets/
+│           └── sidebar_hover.js    #   JavaScript del menú lateral
 ├── docker/
 │   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
 │   └── postgres/01-create-keycloak-db.sql
-├── docs/                       # Esta documentación (+ pensum.png)
-├── scripts/
-│   ├── wait_for_services.py    # Espera a PostgreSQL y Keycloak (make up)
-│   └── configure_keycloak.py   # SMTP del realm y URLs de la app (make up)
-├── tests/                      # Pruebas con pytest (SQLite en memoria)
-├── .streamlit/config.toml
+├── scripts/                        # Operación (los usa el Makefile)
+│   ├── wait_for_services.py        #   Espera a PostgreSQL y Keycloak
+│   ├── configure_keycloak.py       #   SMTP, URLs de la app y proveedor Google en el realm
+│   ├── write_streamlit_secrets.py  #   Genera .streamlit/secrets.toml para st.login
+│   └── migrate_student_emails.py   #   Pasa correos de estudiantes al dominio institucional
+├── tests/                          # pytest por dominio (SQLite en memoria)
+├── docs/                           # Documentación (+ enunciado, resumen y pensum.png)
+├── .streamlit/config.toml          # Tema y servidor (secrets.toml se genera, no se versiona)
 ├── docker-compose.yml  Makefile  pyproject.toml  .pre-commit-config.yaml
 ├── requirements.txt  requirements-dev.txt  .env.example  .gitignore
-└── README.md  PROYECTO.md  CLAUDE.md  project.md
+└── README.md  CLAUDE.md
 ```
 
 ## Ciclo de ejecución de Streamlit
@@ -127,8 +148,8 @@ sequenceDiagram
     autonumber
     participant B as Navegador
     participant M as main.py
-    participant C as ui.common
-    participant V as views/<página>
+    participant C as ui/components
+    participant V as ui/pages/<página>
     participant S as services/*
     participant DB as PostgreSQL
 
@@ -155,14 +176,14 @@ sequenceDiagram
 
 | Clave | Quién la escribe | Significado |
 |-------|------------------|-------------|
-| `user_id` | `views/login.py` | Id del usuario autenticado. Su ausencia equivale a no tener sesión iniciada. |
-| `_flash` | `ui.common.flash` | Avisos pendientes de mostrar como *toast* tras el rerun. |
-| `post_id` | `views/forum.py` | Publicación abierta en vista de detalle. |
-| `profile_id` | `views/community.py` | Perfil público que se está viendo. |
-| `challenge_id` | `views/challenges.py` | Reto cuyo ranking muestra el banner derecho. |
-| `_unverified_login`, `_registered_email` | `views/login.py` | Aviso de cuenta sin activar (con el botón de reenvío) y aviso tras registrarse. |
-| `_deletion_code_sent` | `views/profile.py` | Paso 2 de la eliminación de la cuenta (código enviado). |
-| `_academics_open_expanders` | `views/academics.py` | Menús abiertos del plan académico. |
+| `user_id` | `ui/pages/login.py` | Id del usuario autenticado. Su ausencia equivale a no tener sesión iniciada. |
+| `_flash` | `components.actions.flash` | Avisos pendientes de mostrar como *toast* tras el rerun. |
+| `post_id` | `ui/pages/forum.py` | Publicación abierta en vista de detalle. |
+| `profile_id` | `ui/pages/community.py` | Perfil público que se está viendo. |
+| `challenge_id` | `ui/pages/challenges.py` | Reto cuyo ranking muestra el banner derecho. |
+| `_unverified_login`, `_registered_email` | `ui/pages/login.py` | Aviso de cuenta sin activar (con el botón de reenvío) y aviso tras registrarse. |
+| `_deletion_code_sent` | `ui/pages/profile.py` | Paso 2 de la eliminación de la cuenta (código enviado). |
+| `_academics_open_expanders` | `ui/pages/academics.py` | Menús abiertos del plan académico. |
 | `pensum_program`, `support_tpl`, `support_msg`, … | widgets con `key` | Estado de widgets concretos. |
 
 El estado de sesión vive en la memoria del servidor y está asociado a la conexión WebSocket del
@@ -184,7 +205,7 @@ archivos):
   - *Comunidad:* Personas (`/personas`), Mensajes de apoyo (`/mensajes`, con el contador de no
     leídos), Mi perfil (`/perfil`).
   - *Administración* (sólo `role == "admin"`): Panel de administrador (`/admin`). Además,
-    `views/admin.py` vuelve a verificar el rol al renderizar.
+    `ui/pages/admin.py` vuelve a verificar el rol al renderizar.
 - **Barra lateral:** avatar, nombre, programa y botón "Cerrar sesión", que limpia el
   `session_state`.
   - Si el menú está oculto, se expande al pasar el mouse por el borde izquierdo (ver
