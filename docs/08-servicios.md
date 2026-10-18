@@ -31,6 +31,7 @@ Ver el detalle en [Autenticación](05-autenticacion.md).
 | Función | Descripción |
 |---------|-------------|
 | `validate_username/email/names/password` | Validaciones reutilizables. |
+| `student_domain()`, `student_email(local)`, `validate_student_email(email)` | Dominio institucional obligatorio para estudiantes: arma el correo a partir de la parte local y lo valida. |
 | `hash_password`, `check_password` | bcrypt. |
 | `KeycloakClient` | `password_login`, `create_user`, `reset_password`, `update_user`, `set_enabled`. |
 | `login`, `register`, `change_password`, `change_email`, `change_names`, `set_active` | API pública, independiente del proveedor. |

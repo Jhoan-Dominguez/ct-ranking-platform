@@ -25,7 +25,7 @@ Todas lanzan `AuthError` con un mensaje en español apto para mostrar al usuario
 | Dato | Regla |
 |------|-------|
 | Usuario | `^[a-zA-Z0-9_.-]{3,30}$` y único, sin distinguir mayúsculas. |
-| Correo | Formato `algo@dominio.tld`. Se guarda en minúsculas y debe ser único. |
+| Correo | Formato `algo@dominio.tld`. Se guarda en minúsculas y debe ser único. Los **estudiantes** deben usar `@STUDENT_EMAIL_DOMAIN` (por defecto `@estudiantes.areandina.edu.co`): en el formulario sólo escriben la parte antes de la @ (`auth.student_email`), y `register` y `change_email` lo validan (`validate_student_email`). Los administradores están exentos. |
 | Nombre y apellido | Ambos obligatorios: Keycloak 26 los exige (ver abajo). |
 | Contraseña | Mínimo 8 caracteres y máximo 72 bytes (límite de bcrypt). Debe contener letras y números. |
 

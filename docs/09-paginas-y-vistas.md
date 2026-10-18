@@ -45,7 +45,7 @@ Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 | Pestaña | Campos | Acción |
 |---------|--------|--------|
 | Iniciar sesión | Usuario o correo, contraseña y **código de verificación (2FA)**, que es opcional y sólo se usa si el usuario lo activó | `auth.login` → guarda `user_id` en la sesión y muestra «¡Bienvenido…!». |
-| Crear cuenta | Nombre, apellido, usuario, correo, contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register`. Con Keycloak aparece «Te enviamos un enlace de activación a …». |
+| Crear cuenta | Nombre, apellido, usuario, **correo institucional** (sólo la parte antes de la @; el dominio `@estudiantes.areandina.edu.co` es fijo) y contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register`. Con Keycloak aparece «Te enviamos un enlace de activación a …». |
 
 - **Cuenta sin activar.** Si alguien intenta entrar sin haber activado la cuenta, aparece «Tu
   cuenta aún no está activada» con el botón **Reenviar correo de activación**.
@@ -292,7 +292,7 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   actual y total de semestres.
 - **Pestaña "Cuenta y seguridad":**
   - Usuario (sólo lectura).
-  - Cambio de correo (`auth.change_email`).
+  - Cambio de correo (`auth.change_email`). Los estudiantes sólo editan la parte antes de la @ del correo institucional; los administradores, el correo completo.
   - Cambio de contraseña: actual, nueva, confirmación y código 2FA si está activo
     (`auth.change_password`).
   - **Verificación en dos pasos (2FA):**

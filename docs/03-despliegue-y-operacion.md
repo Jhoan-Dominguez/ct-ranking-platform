@@ -79,6 +79,7 @@ las variables de entorno del contenedor.
 | `make seed-demo` | Carga los datos de demostración (idempotente). |
 | `make reset-db` | **Borra y recrea** todas las tablas de la app. No toca Keycloak. |
 | `make purge-accounts` | Borra definitivamente las cuentas cuyo plazo de eliminación venció (en la app y en Keycloak). |
+| `make migrate-emails` | Pasa el correo de los estudiantes existentes al dominio institucional, en la app y en Keycloak. `ARGS=--dry-run` sólo muestra los cambios. |
 | `make test` | Ejecuta pytest. |
 | `make lint` | `pre-commit run --all-files`. |
 | `make format` | isort + `ruff check --fix` + `ruff format`. |

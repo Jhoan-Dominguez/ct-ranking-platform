@@ -117,6 +117,7 @@ prioridad sobre las de `.env`.
 | `MAILPIT_UI_PORT` | `8025` | compose | Puerto de la bandeja web de Mailpit. |
 | `MAIL_BACKEND` | `smtp` | app | `smtp` envía correos; `memory` los guarda en memoria (pruebas). |
 | `ACCOUNT_DELETION_DAYS` | `7` | app | Días de espera antes de borrar definitivamente una cuenta. |
+| `STUDENT_EMAIL_DOMAIN` | `estudiantes.areandina.edu.co` | app | Dominio obligatorio del correo de los **estudiantes** (registro y cambio de correo). Los administradores están exentos. |
 
 > ⚠️ Hay **dos administradores distintos**. `KEYCLOAK_ADMIN` sirve para entrar a la consola de
 > Keycloak (http://localhost:8180). `APP_ADMIN_USERNAME` sirve para entrar a la plataforma
