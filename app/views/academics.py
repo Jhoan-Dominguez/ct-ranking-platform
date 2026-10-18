@@ -202,6 +202,64 @@ def _edit_item_dialog(user_id: int, item) -> None:
     _item_form(user_id, item.subject_id, f"edit_item_{item.id}", item)
 
 
+def _subject_key(subject: Subject) -> str:
+    return f"subject_expander_{subject.id}"
+
+
+def _semester_key(semester: int) -> str:
+    return f"plan_semester_expander_{semester}"
+
+
+EXPANDER_MEMORY = "_academics_open_expanders"
+
+
+def _remember(key: str) -> None:
+    st.session_state.setdefault(EXPANDER_MEMORY, {})[key] = st.session_state[key]
+
+
+def _set_expanded(keys: list[str], expanded: bool) -> None:
+    # Se ejecuta como callback (antes del rerun), así que fija el estado antes de dibujar.
+    memory = st.session_state.setdefault(EXPANDER_MEMORY, {})
+    for key in keys:
+        st.session_state[key] = memory[key] = expanded
+
+
+def _stateful_expander(label: str, key: str):
+    """Expander cuyo estado abierto/cerrado se conserva aunque cambie su título.
+
+    Streamlit identifica el expander también por su etiqueta (que aquí incluye notas y
+    promedios), así que al cambiar ésta lo trataría como uno nuevo y lo cerraría. Por eso se
+    recuerda el estado en session_state y se restaura antes de dibujarlo.
+    """
+    memory = st.session_state.setdefault(EXPANDER_MEMORY, {})
+    if key in memory:
+        st.session_state[key] = memory[key]
+    return st.expander(label, key=key, on_change=_remember, args=(key,))
+
+
+def _expand_controls(keys: list[str], scope: str) -> None:
+    """Botones para expandir o colapsar a la vez todos los menús de una pestaña."""
+    if not keys:
+        return
+    with st.container(horizontal=True, horizontal_alignment="right"):
+        st.button(
+            "Expandir todo",
+            key=f"expand_all_{scope}",
+            icon=":material/unfold_more:",
+            type="tertiary",
+            on_click=_set_expanded,
+            args=(keys, True),
+        )
+        st.button(
+            "Colapsar todo",
+            key=f"collapse_all_{scope}",
+            icon=":material/unfold_less:",
+            type="tertiary",
+            on_click=_set_expanded,
+            args=(keys, False),
+        )
+
+
 def _subject_card(user, subject: Subject) -> None:
     grade = academics.subject_grade(subject.items)
     progress = academics.weighted_progress(subject.items)
@@ -212,7 +270,7 @@ def _subject_card(user, subject: Subject) -> None:
         f"{f'({subject.code})' if subject.code else ''} · {subject.credits} cr · "
         f":{color}[nota {common.fmt_grade(grade)}]"
     )
-    with st.expander(title):
+    with _stateful_expander(title, _subject_key(subject)):
         meta, actions = st.columns([3, 2])
         meta.caption(
             f"{CATEGORY_LABELS[SubjectCategory(subject.category)]} · "
@@ -435,6 +493,7 @@ def render() -> None:
             current = [x for x in subjects if x.semester == user.current_semester]
             if not current:
                 st.info("No tienes materias en el semestre actual. Usa «Agregar materia».")
+            _expand_controls([_subject_key(x) for x in current], "current")
             for subject in current:
                 _subject_card(user, subject)
 
@@ -447,6 +506,10 @@ def render() -> None:
             past = [sem for sem in summary.semesters if sem.semester < user.current_semester]
             if not past:
                 st.info("Aún no registras semestres anteriores.")
+            past_numbers = {sem.semester for sem in past}
+            _expand_controls(
+                [_subject_key(x) for x in subjects if x.semester in past_numbers], "history"
+            )
             for sem in past:
                 st.markdown(
                     f"#### Semestre {sem.semester} · promedio {common.fmt_grade(sem.average)} "
@@ -462,13 +525,15 @@ def render() -> None:
                     "Registra todas las materias de tu pensum o cárgalo desde «Datos del plan "
                     "de estudios» (quedan como «Pendiente» para planear semestres futuros)."
                 )
+            _expand_controls([_semester_key(x.semester) for x in summary.semesters], "plan")
             for sem in summary.semesters:
                 sem_subjects = [x for x in subjects if x.semester == sem.semester]
                 passed = sum(1 for x in sem_subjects if x.status == SubjectStatus.PASSED)
                 marker = " · 📍 actual" if sem.semester == user.current_semester else ""
                 average = f" · promedio {common.fmt_grade(sem.average)}" if sem.average else ""
-                with st.expander(
+                with _stateful_expander(
                     f"📘 **Semestre {sem.semester}**{marker} · {sem.subjects} materias · "
-                    f"{sem.credits} créditos · {passed}/{sem.subjects} aprobadas{average}"
+                    f"{sem.credits} créditos · {passed}/{sem.subjects} aprobadas{average}",
+                    _semester_key(sem.semester),
                 ):
                     _semester_table(sem_subjects)
