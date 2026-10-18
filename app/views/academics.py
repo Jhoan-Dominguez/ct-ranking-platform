@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -25,6 +24,10 @@ STATUS_LABELS = {
 PASSED_COLOR = "#7CC6F2"  # azul claro: créditos aprobados
 IN_PROGRESS_COLOR = "#9CA3AF"  # gris: créditos que se están cursando
 REMAINING_COLOR = "rgba(156, 163, 175, 0.15)"
+AVERAGE_COLOR = "#4F46E5"  # promedio por semestre (color primario de la app)
+PASSING_COLOR = "#DC2626"  # rojo: nota mínima aprobatoria
+GENERAL_AVERAGE_COLOR = "#16A34A"  # verde: promedio general
+CHART_HEIGHT = 320  # altura común para que las gráficas lado a lado queden alineadas
 
 
 def _plan_header(user) -> None:
@@ -268,21 +271,47 @@ def _averages_chart(summary: academics.AcademicSummary) -> None:
             if x.average is not None
         ]
     )
+    st.markdown("**Evolución del promedio por semestre**")
     if data.empty:
+        st.caption("Aún no hay notas registradas.")
         return
     settings = get_settings()
-    fig = px.line(data, x="Semestre", y="Promedio", markers=True, range_y=[0, settings.grade_max])
-    fig.add_hline(
-        y=settings.grade_passing, line_dash="dot", line_color="red", annotation_text="Aprobación"
+    semesters = data["Semestre"].tolist()
+    fig = go.Figure()
+    fig.add_scatter(
+        name="Promedio del semestre",
+        x=semesters,
+        y=data["Promedio"],
+        mode="lines+markers",
+        line={"color": AVERAGE_COLOR, "width": 3},
+        hovertemplate="%{x}: %{y:.2f}<extra></extra>",
+    )
+    # Las líneas de referencia se dibujan como series para que aparezcan en la leyenda.
+    fig.add_scatter(
+        name=f"Nota mínima aprobatoria ({settings.grade_passing:g})",
+        x=semesters,
+        y=[settings.grade_passing] * len(semesters),
+        mode="lines",
+        line={"color": PASSING_COLOR, "dash": "dot"},
+        hoverinfo="skip",
     )
     if summary.general_average is not None:
-        fig.add_hline(
-            y=summary.general_average,
-            line_dash="dash",
-            line_color="green",
-            annotation_text="Promedio general",
+        fig.add_scatter(
+            name=f"Promedio general ({summary.general_average:.2f})",
+            x=semesters,
+            y=[summary.general_average] * len(semesters),
+            mode="lines",
+            line={"color": GENERAL_AVERAGE_COLOR, "dash": "dash"},
+            hoverinfo="skip",
         )
-    fig.update_layout(height=280, margin={"l": 10, "r": 10, "t": 10, "b": 10})
+    fig.update_layout(
+        height=CHART_HEIGHT,
+        margin={"l": 10, "r": 10, "t": 10, "b": 10},
+        yaxis={"range": [0, settings.grade_max], "title": "Promedio"},
+        xaxis={"title": None},
+        legend={"orientation": "h", "y": -0.25},
+        showlegend=True,
+    )
     st.plotly_chart(fig, width="stretch")
 
 
@@ -335,15 +364,15 @@ def credits_chart(subjects: list[Subject]) -> None:
     )
     fig.update_layout(
         barmode="stack",
-        height=70 + 48 * len(rows),
+        height=max(CHART_HEIGHT, 70 + 48 * len(rows)),
         margin={"l": 10, "r": 10, "t": 10, "b": 10},
         xaxis={"range": [0, 100], "ticksuffix": "%", "title": None},
         yaxis={"autorange": "reversed"},
-        legend={"orientation": "h", "y": -0.25},
+        legend={"orientation": "h", "y": -0.25, "traceorder": "normal"},
     )
     st.markdown(
-        f"**Avance de créditos:** {total.passed} aprobados + {total.in_progress} cursando de "
-        f"{total.total} créditos del plan ({total.passed_pct + total.in_progress_pct:.0f}%)"
+        f"**Avance de créditos** · {total.passed} aprobados + {total.in_progress} cursando "
+        f"de {total.total} ({total.passed_pct + total.in_progress_pct:.0f}%)"
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -410,8 +439,11 @@ def render() -> None:
                 _subject_card(user, subject)
 
         with tab_history:
-            credits_chart(subjects)
-            _averages_chart(summary)
+            left, right = st.columns(2, gap="medium")
+            with left:
+                credits_chart(subjects)
+            with right:
+                _averages_chart(summary)
             past = [sem for sem in summary.semesters if sem.semester < user.current_semester]
             if not past:
                 st.info("Aún no registras semestres anteriores.")
