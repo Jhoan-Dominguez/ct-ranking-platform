@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -30,6 +31,20 @@ TIMEOUT = 10
 
 class AuthError(Exception):
     """Error con mensaje apto para mostrar al usuario."""
+
+
+class EmailNotVerifiedError(AuthError):
+    """Credenciales correctas, pero la cuenta aún no se activó con el enlace del correo."""
+
+    def __init__(self, login: str) -> None:
+        super().__init__(
+            "Tu cuenta aún no está activada. Abre el enlace que te enviamos por correo "
+            "(revisa también la carpeta de spam)."
+        )
+        self.login = login
+
+
+INVALID_LOGIN = "Usuario, contraseña o código de verificación incorrectos."
 
 
 # --------------------------------------------------------------------------- validaciones
@@ -91,6 +106,7 @@ class Identity:
     email: str
     first_name: str = ""
     last_name: str = ""
+    email_verified: bool = True
     roles: set[str] = field(default_factory=set)
 
 
@@ -131,20 +147,30 @@ class KeycloakClient:
                 "¿Ejecutaste `make up`?"
             ) from exc
 
-    def password_login(self, username: str, password: str) -> Identity:
-        resp = self._post_token(
-            {
-                "grant_type": "password",
-                "username": username,
-                "password": password,
-                "scope": "openid",
-            }
-        )
+    def password_login(self, username: str, password: str, otp: str | None = None) -> Identity:
+        """Login con usuario y contraseña (flujo "direct grant"). Si el usuario tiene 2FA, el
+        flujo del realm exige además el código TOTP en el parámetro ``otp``."""
+        data = {"grant_type": "password", "username": username, "password": password}
+        if otp:
+            data["otp"] = otp.strip().replace(" ", "")
+        resp = self._post_token({**data, "scope": "openid"})
         if resp.status_code in (400, 401):
-            description = resp.json().get("error_description", "")
-            if "disabled" in description.lower():
+            description = resp.json().get("error_description", "").lower()
+            if "disabled" in description:
                 raise AuthError("La cuenta está deshabilitada.")
-            raise AuthError("Usuario o contraseña incorrectos.")
+            if "not fully set up" in description:
+                # Sólo ocurre con la contraseña correcta: falta una acción requerida.
+                if self._pending_email_verification(username):
+                    raise EmailNotVerifiedError(username)
+                raise AuthError("La cuenta tiene acciones pendientes. Contacta al administrador.")
+            # Keycloak responde igual ante contraseña o código incorrecto, código faltante y
+            # bloqueo temporal por fuerza bruta; este último sí se puede consultar aparte.
+            if self._temporarily_locked(username):
+                raise AuthError(
+                    "Demasiados intentos fallidos: la cuenta está bloqueada temporalmente. "
+                    "Espera un minuto e inténtalo de nuevo."
+                )
+            raise AuthError(INVALID_LOGIN)
         resp.raise_for_status()
         claims = _decode_jwt_payload(resp.json()["access_token"])
         return Identity(
@@ -153,8 +179,71 @@ class KeycloakClient:
             email=claims.get("email", ""),
             first_name=claims.get("given_name", ""),
             last_name=claims.get("family_name", ""),
+            email_verified=bool(claims.get("email_verified", True)),
             roles=set(claims.get("realm_access", {}).get("roles", [])),
         )
+
+    # ---------------------------------------------------------------- consultas de usuarios
+
+    def find_user(self, login: str) -> dict | None:
+        """Busca un usuario por username o correo (coincidencia exacta)."""
+        key = "email" if "@" in login else "username"
+        resp = self._request("GET", "/users", params={key: login.strip(), "exact": "true"})
+        resp.raise_for_status()
+        users = resp.json()
+        return users[0] if users else None
+
+    def _pending_email_verification(self, login: str) -> bool:
+        user = self.find_user(login)
+        return bool(user and "VERIFY_EMAIL" in user.get("requiredActions", []))
+
+    def _temporarily_locked(self, login: str) -> bool:
+        try:
+            user = self.find_user(login)
+            if not user:
+                return False
+            resp = self._request("GET", f"/attack-detection/brute-force/users/{user['id']}")
+            return resp.ok and bool(resp.json().get("disabled"))
+        except (AuthError, requests.RequestException):
+            return False
+
+    # ---------------------------------------------------------------- correos de Keycloak
+
+    def _redirect_params(self) -> dict[str, str]:
+        # Tras completar la acción, Keycloak muestra "Volver a la aplicación" hacia la app.
+        return {"client_id": self.client_id, "redirect_uri": f"{get_settings().app_url}/"}
+
+    def send_verify_email(self, user_id: str) -> None:
+        resp = self._request(
+            "PUT", f"/users/{user_id}/send-verify-email", params=self._redirect_params()
+        )
+        if resp.status_code >= 400:
+            raise AuthError("No fue posible enviar el correo de activación. Revisa el SMTP.")
+
+    def send_actions_email(self, user_id: str, actions: list[str], lifespan_s: int) -> None:
+        resp = self._request(
+            "PUT",
+            f"/users/{user_id}/execute-actions-email",
+            params={**self._redirect_params(), "lifespan": lifespan_s},
+            json=actions,
+        )
+        if resp.status_code >= 400:
+            raise AuthError("No fue posible enviar el correo. Revisa la configuración SMTP.")
+
+    # ---------------------------------------------------------------- credenciales 2FA
+
+    def otp_credentials(self, user_id: str) -> list[dict]:
+        resp = self._request("GET", f"/users/{user_id}/credentials")
+        resp.raise_for_status()
+        return [c for c in resp.json() if c.get("type") == "otp"]
+
+    def delete_credential(self, user_id: str, credential_id: str) -> None:
+        self._request("DELETE", f"/users/{user_id}/credentials/{credential_id}").raise_for_status()
+
+    def delete_user(self, user_id: str) -> None:
+        resp = self._request("DELETE", f"/users/{user_id}")
+        if resp.status_code not in (204, 404):
+            resp.raise_for_status()
 
     def _admin_headers(self) -> dict[str, str]:
         resp = self._post_token({"grant_type": "client_credentials"})
@@ -175,7 +264,13 @@ class KeycloakClient:
             raise AuthError("No fue posible contactar Keycloak.") from exc
 
     def create_user(
-        self, username: str, email: str, password: str, first_name: str, last_name: str
+        self,
+        username: str,
+        email: str,
+        password: str,
+        first_name: str,
+        last_name: str,
+        verified: bool = False,
     ) -> str:
         resp = self._request(
             "POST",
@@ -186,7 +281,9 @@ class KeycloakClient:
                 "firstName": first_name,
                 "lastName": last_name,
                 "enabled": True,
-                "emailVerified": True,
+                "emailVerified": verified,
+                # Sin verificar, Keycloak rechaza el login hasta abrir el enlace del correo.
+                "requiredActions": [] if verified else ["VERIFY_EMAIL"],
                 "credentials": [{"type": "password", "value": password, "temporary": False}],
             },
         )
@@ -262,17 +359,23 @@ def _sync_keycloak_user(session: Session, identity: Identity) -> User:
         user.email = identity.email
     if not user.full_name:
         user.first_name, user.last_name = identity.first_name, identity.last_name
+    user.email_verified = identity.email_verified
     # Keycloak puede otorgar el rol admin; las promociones hechas desde el panel se conservan.
     if Role.ADMIN in identity.roles:
         user.role = Role.ADMIN
     return user
 
 
-def login(session: Session, username: str, password: str) -> User:
+def login(session: Session, username: str, password: str, otp: str | None = None) -> User:
+    """Inicia sesión. ``otp`` es el código de la app autenticadora si el usuario tiene 2FA.
+
+    Una cuenta con eliminación programada sí puede iniciar sesión (para poder cancelarla); la
+    interfaz se encarga de restringir lo que ve."""
     if not username.strip() or not password:
         raise AuthError("Ingresa usuario y contraseña.")
     if _uses_keycloak():
-        user = _sync_keycloak_user(session, KeycloakClient().password_login(username, password))
+        identity = KeycloakClient().password_login(username, password, otp)
+        user = _sync_keycloak_user(session, identity)
     else:
         user = _find_by_login(session, username)
         if user is None or not check_password(password, user.password_hash):
@@ -293,7 +396,11 @@ def register(
     first_name: str,
     last_name: str,
     role: Role = Role.STUDENT,
+    require_verification: bool = True,
 ) -> User:
+    """Crea la cuenta. Con Keycloak y ``require_verification`` (por defecto) la cuenta queda
+    pendiente de activación y Keycloak envía el enlace de verificación al correo. Con el
+    proveedor local la cuenta queda activa de inmediato."""
     username = validate_username(username)
     email = validate_email(email)
     first_name, last_name = validate_names(first_name, last_name)
@@ -303,9 +410,16 @@ def register(
         username=username, email=email, first_name=first_name, last_name=last_name, role=role
     )
     if _uses_keycloak():
-        user.keycloak_id = KeycloakClient().create_user(
-            username, email, password, first_name, last_name
+        client = KeycloakClient()
+        user.keycloak_id = client.create_user(
+            username, email, password, first_name, last_name, verified=not require_verification
         )
+        user.email_verified = not require_verification
+        if require_verification:
+            # Si el correo falla la cuenta no se revierte: el enlace se puede reenviar desde
+            # la pantalla de login.
+            with contextlib.suppress(AuthError):
+                client.send_verify_email(user.keycloak_id)
     else:
         user.password_hash = hash_password(password)
     session.add(user)
@@ -313,11 +427,67 @@ def register(
     return user
 
 
-def change_password(session: Session, user: User, current: str, new: str) -> None:
+def resend_verification(login: str) -> None:
+    """Reenvía el enlace de activación. No revela si la cuenta existe."""
+    if not _uses_keycloak() or not login.strip():
+        return
+    client = KeycloakClient()
+    user = client.find_user(login)
+    if user and "VERIFY_EMAIL" in user.get("requiredActions", []):
+        client.send_verify_email(user["id"])
+
+
+def verify_credentials(user: User, password: str, otp: str | None = None) -> None:
+    """Re-autenticación para acciones sensibles (eliminar la cuenta, desactivar 2FA…)."""
+    if _uses_keycloak():
+        KeycloakClient().password_login(user.username, password, otp)
+    elif not check_password(password, user.password_hash):
+        raise AuthError("La contraseña no es correcta.")
+
+
+# --------------------------------------------------------------------------- 2FA (TOTP)
+
+TOTP_SETUP_LINK_HOURS = 12
+
+
+def two_factor_supported() -> bool:
+    return _uses_keycloak()
+
+
+def two_factor_enabled(user: User) -> bool:
+    if not _uses_keycloak() or not user.keycloak_id:
+        return False
+    return bool(KeycloakClient().otp_credentials(user.keycloak_id))
+
+
+def request_two_factor_setup(user: User) -> None:
+    """Keycloak envía al correo un enlace a su página de configuración, que muestra el QR para
+    escanear con Google Authenticator, Microsoft Authenticator o FreeOTP."""
+    if not _uses_keycloak() or not user.keycloak_id:
+        raise AuthError("El 2FA sólo está disponible con Keycloak (AUTH_PROVIDER=keycloak).")
+    KeycloakClient().send_actions_email(
+        user.keycloak_id, ["CONFIGURE_TOTP"], TOTP_SETUP_LINK_HOURS * 3600
+    )
+
+
+def disable_two_factor(user: User, password: str, otp: str) -> None:
+    if not _uses_keycloak() or not user.keycloak_id:
+        raise AuthError("El 2FA sólo está disponible con Keycloak.")
+    if not otp.strip():
+        raise AuthError("Escribe el código actual de tu app autenticadora.")
+    verify_credentials(user, password, otp)
+    client = KeycloakClient()
+    for credential in client.otp_credentials(user.keycloak_id):
+        client.delete_credential(user.keycloak_id, credential["id"])
+
+
+def change_password(
+    session: Session, user: User, current: str, new: str, otp: str | None = None
+) -> None:
     validate_password(new)
     if _uses_keycloak():
         client = KeycloakClient()
-        client.password_login(user.username, current)  # verifica la contraseña actual
+        client.password_login(user.username, current, otp)  # verifica la contraseña actual
         if user.keycloak_id is None:
             raise AuthError("El usuario no está vinculado a Keycloak.")
         client.reset_password(user.keycloak_id, new)

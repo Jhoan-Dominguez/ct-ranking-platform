@@ -168,6 +168,7 @@ def load_demo(seed: int = 7) -> None:
                     password=DEMO_PASSWORD,
                     first_name=first,
                     last_name=last,
+                    require_verification=False,  # cuentas demo ya activadas
                 )
             except auth.AuthError:
                 # Ya existe en Keycloak (p. ej. tras `make reset-db`): se vincula al iniciar sesión.
