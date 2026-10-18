@@ -6,7 +6,7 @@ APP_PORT    ?= $(shell grep -E '^APP_PORT=' .env 2>/dev/null | cut -d= -f2 || ec
 
 .DEFAULT_GOAL := help
 .PHONY: help create env install up down restart logs ps init-db seed-demo reset-db run dev \
-        purge-accounts test lint format clean destroy
+        purge-accounts migrate-emails test lint format clean destroy
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -63,6 +63,9 @@ reset-db: ## Borra y recrea todas las tablas de la app (¡pierde los datos!)
 
 purge-accounts: ## Elimina definitivamente las cuentas cuyo plazo de eliminación venció
 	$(PYTHON) -m app.jobs.purge_accounts
+
+migrate-emails: ## Pasa el correo de los estudiantes al dominio institucional (ARGS=--dry-run)
+	$(PYTHON) scripts/migrate_student_emails.py $(ARGS)
 
 # ---------------------------------------------------------------- calidad
 
