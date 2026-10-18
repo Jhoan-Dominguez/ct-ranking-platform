@@ -19,12 +19,15 @@ y detectar a tiempo a quienes están en riesgo académico.
 |--------|--------|---------|
 | Inicio | 🏠 Inicio | Tablero personal con promedios, puntos, posición en el ranking, retos en curso, últimas discusiones, apoyos recibidos y actividad de las personas que sigo. |
 | Foros | 💬 Foros | Publicaciones con categoría, etiquetas y Markdown; comentarios, "me gusta" y estado resuelto. |
-| Plan académico | 📚 Plan académico | Plan de estudios por semestres, materias con categoría y créditos, ítems calificables, promedios, avance de créditos por categoría y carga de pensum. |
+| Plan académico | 📚 Plan académico | Plan de estudios por semestres, materias con categoría y créditos, ítems calificables, promedios, gráficas de avance de créditos por categoría y de evolución del promedio, carga de pensum y botones para expandir o colapsar todos los menús. |
 | Retos | 🏆 Retos | Retos globales con verificación automática y retos creados por estudiantes; ranking por reto y ranking general. |
 | Personas | 👥 Personas | Búsqueda de estudiantes, seguir y dejar de seguir, perfil público y mensajes de apoyo. |
 | Mensajes | 💌 Mensajes de apoyo | Bandeja de recibidos y enviados. |
 | Perfil | 👤 Mi perfil | Datos personales y académicos, foto, correo y contraseña. |
 | Administración | 🛡️ Panel de administrador | Métricas globales, detalle por estudiante, análisis de grupos, moderación y gestión de usuarios. |
+
+La navegación está en el **menú lateral** izquierdo. Se puede ocultar, y estando oculto se
+expande al pasar el mouse por el borde izquierdo de la ventana.
 
 ## Roles
 

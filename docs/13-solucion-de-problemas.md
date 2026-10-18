@@ -17,6 +17,8 @@
 | "La suma de porcentajes de la materia superaría el 100%" | Los ítems ya suman cerca de 100 %. | Ajusta los porcentajes existentes o deja el nuevo ítem en 0 % (promedio simple). |
 | No veo un reto de un compañero | El reto es "sólo seguidores". | Sigue al creador desde **Personas**. |
 | No puedo unirme a un reto | El reto está cerrado (inactivo o fuera de fechas). | Pide al creador que lo reabra o que ajuste las fechas. |
+| El menú lateral oculto no se abre al pasar el mouse | Pantalla táctil o navegador que no reporta un puntero con hover (el script sólo se activa con mouse). También puede pasar tras actualizar Streamlit, si cambiaron los `data-testid` de los botones del menú. | Usa el botón «>>». Tras una actualización de Streamlit, revisa los selectores en `app/ui/sidebar_hover.js` (ver [Páginas y vistas](09-paginas-y-vistas.md#menú-lateral-expandir-al-pasar-el-mouse)). |
+| «Expandir todo» no abre una materia recién creada | La materia aún no existía cuando se pulsó el botón. | Pulsa de nuevo «Expandir todo». El estado se guarda por materia. |
 | `pre-commit run --all-files` no revisa mis archivos nuevos | Sólo revisa los archivos versionados. | `git add` primero, o `pre-commit run --files <rutas>`. |
 | Aviso `missing ScriptRunContext` al ejecutar scripts o pruebas | Se importó Streamlit fuera de `streamlit run` (por ejemplo, con `AppTest`). | Se puede ignorar. |
 

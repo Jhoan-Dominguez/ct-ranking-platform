@@ -103,10 +103,15 @@ intercambiables con `AUTH_PROVIDER`:
     nota.
 - **Apoyos visuales:**
   - El botón **"Cerrar"** sugiere marcar la materia como aprobada o reprobada según la nota.
-  - Una gráfica muestra la evolución del promedio por semestre, con línea de aprobación.
-  - Una **gráfica de avance de créditos** en "Historia académica" muestra, por categoría y en
-    total, el % de créditos del plan **aprobados (azul claro)** y **en curso (gris)**. Las
-    materias repetidas cuentan una sola vez.
+  - En "Historia académica" hay dos gráficas **lado a lado**:
+    - **Avance de créditos:** por categoría y en total, el % de créditos del plan
+      **aprobados (azul claro)** y **en curso (gris)**. Las materias repetidas cuentan una
+      sola vez.
+    - **Evolución del promedio:** promedio por semestre, con una **leyenda** que identifica
+      cada línea (promedio del semestre, nota mínima aprobatoria y promedio general).
+  - Botones **"Expandir todo" / "Colapsar todo"** en cada pestaña, para ver de inmediato el
+    detalle de todas las materias o semestres. Las materias abiertas siguen abiertas aunque cambie
+    su nota.
 - La escala de notas se configura en `.env` (`GRADE_MIN`, `GRADE_MAX`, `GRADE_PASSING`). Por
   defecto es 0–5 y se aprueba con 3.
 
@@ -185,6 +190,8 @@ intercambiables con `AUTH_PROVIDER`:
 - **Catálogo de pensum**, **categorías de materias** y **avance de créditos por categoría**,
   también visible en el detalle de estudiante del panel de administrador.
 - Perfil público con logros, y avatar con iniciales por defecto.
+- Menú lateral que, estando oculto, **se expande al pasar el mouse** por el borde izquierdo y se
+  vuelve a ocultar al salir de él.
 - Plantillas de mensajes de apoyo y contador de no leídos.
 - Proveedor de autenticación **local** alternativo a Keycloak.
 - **Datos de demostración** (`make seed-demo`). Ocho estudiantes de Ingeniería de Software en

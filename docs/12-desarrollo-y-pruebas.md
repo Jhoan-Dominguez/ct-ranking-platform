@@ -82,6 +82,33 @@ assert not at.exception
 print([e.label for e in at.expander])
 ```
 
+### Pruebas en un navegador real (JavaScript)
+
+`AppTest` no ejecuta JavaScript ni permite hacer clic en un `st.expander`. Para lo que depende
+del navegador (el menú lateral que se expande con el mouse, `app/ui/sidebar_hover.js`, o abrir un
+expander a mano) se usa **Selenium con Firefox en modo headless**, instalado en un entorno
+virtual aparte para no agregarlo a las dependencias del proyecto:
+
+```bash
+python3 -m venv /tmp/selenv && /tmp/selenv/bin/pip install selenium
+make run   # en otra terminal
+```
+
+```python
+from selenium import webdriver
+
+opts = webdriver.FirefoxOptions()
+opts.add_argument("-headless")
+# Firefox headless dice que no hay mouse; esto simula un puntero fino con hover,
+# necesario para que sidebar_hover.js se active.
+opts.set_preference("ui.primaryPointerCapabilities", 6)
+opts.set_preference("ui.allPointerCapabilities", 6)
+driver = webdriver.Firefox(options=opts)
+driver.get("http://localhost:8501")
+# … iniciar sesión, ocultar el menú y mover el puntero con ActionBuilder.move_to_location(5, 400)
+# … verificar section[data-testid="stSidebar"] → data-collapsed == "false"
+```
+
 ## Convenciones del código
 
 - **Idioma:** la interfaz, los mensajes, los comentarios y la documentación están en español.
