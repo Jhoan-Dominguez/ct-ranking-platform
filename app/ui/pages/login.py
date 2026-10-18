@@ -114,7 +114,12 @@ def _login_tab() -> None:
     _password_step()
 
     if auth.google_login_enabled():
-        _google_button()
+        _google_button(
+            session.GOOGLE_LOGIN,
+            "Iniciar sesión con Google",
+            "Sólo si ya tienes cuenta. ¿Aún no? Usa «Crear cuenta con Google» en la pestaña "
+            "«Crear cuenta».",
+        )
 
     unverified = st.session_state.get(UNVERIFIED_LOGIN)
     if unverified:
@@ -129,20 +134,30 @@ def _login_tab() -> None:
                 _resend(login)
 
 
-def _google_button() -> None:
-    domain = auth.student_domain()
+def _google_button(provider: str, label: str, caption: str) -> None:
     st.markdown(
         "<div style='text-align:center;opacity:.6;margin:.3rem 0'>— o —</div>",
         unsafe_allow_html=True,
     )
-    if error := st.session_state.get(session.OIDC_ERROR):
-        st.error(error)
-        if st.button("Usar otra cuenta de Google", width="stretch"):
-            session.logout()
+    if st.button(label, icon=":material/account_circle:", width="stretch", key=provider):
+        st.login(provider)
+    st.caption(caption)
+
+
+def _google_error() -> None:
+    """Resultado fallido al volver de Google (p. ej. «iniciar sesión» sin tener cuenta)."""
+    error = st.session_state.get(session.OIDC_ERROR)
+    if not error:
         return
-    if st.button("Continuar con Google", icon=":material/account_circle:", width="stretch"):
-        st.login("google")
-    st.caption(f"Sólo con tu cuenta institucional @{domain}. La primera vez se crea tu cuenta.")
+    st.error(error["message"], icon="⚠️")
+    c1, c2 = st.columns(2)
+    if error["not_found"] and c1.button(
+        "Crear cuenta con Google", type="primary", width="stretch", key="google_signup_retry"
+    ):
+        st.session_state.pop(session.OIDC_ERROR, None)
+        st.login(session.GOOGLE_SIGNUP)
+    if c2.button("Usar otra cuenta de Google", width="stretch", key="google_other"):
+        session.logout()
 
 
 def _register_tab() -> None:
@@ -194,11 +209,19 @@ def render() -> None:
                 "Ábrelo para activar tu cuenta y luego inicia sesión.",
                 icon="📧",
             )
+        _google_error()
         tab_login, tab_register = st.tabs(["Iniciar sesión", "Crear cuenta"])
         with tab_login:
             _login_tab()
         with tab_register:
             _register_tab()
+            if auth.google_login_enabled():
+                _google_button(
+                    session.GOOGLE_SIGNUP,
+                    "Crear cuenta con Google",
+                    f"Con tu cuenta institucional @{auth.student_domain()}: se usan tu nombre y tu "
+                    "correo de Google, y la cuenta queda activada de inmediato.",
+                )
 
         provider = "Keycloak" if settings.auth_provider == "keycloak" else "base de datos local"
         st.caption(f"🔒 Autenticación mediante {provider}.")

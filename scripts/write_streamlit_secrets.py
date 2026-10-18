@@ -42,14 +42,20 @@ def main() -> None:
         f"redirect_uri = {_toml_str(settings.app_url + '/oauth2callback')}",
         f"cookie_secret = {_toml_str(cookie_secret)}",
         "",
-        "[auth.google]",
-        f"client_id = {_toml_str(settings.keycloak_client_id)}",
-        f"client_secret = {_toml_str(settings.keycloak_client_secret)}",
-        f"server_metadata_url = {_toml_str(realm_url + '/.well-known/openid-configuration')}",
-        'client_kwargs = { scope = "openid email profile", prompt = "login" }',
-        'authorize_params = { kc_idp_hint = "google" }',
-        "",
     ]
+    # Dos proveedores idénticos (Keycloak → Google): el nombre indica la intención y Streamlit lo
+    # guarda en st.user["provider"]. "google" = iniciar sesión (la cuenta debe existir);
+    # "googlesignup" = crear la cuenta.
+    for provider in ("google", "googlesignup"):  # sin "_": Streamlit no lo admite
+        lines += [
+            f"[auth.{provider}]",
+            f"client_id = {_toml_str(settings.keycloak_client_id)}",
+            f"client_secret = {_toml_str(settings.keycloak_client_secret)}",
+            f"server_metadata_url = {_toml_str(realm_url + '/.well-known/openid-configuration')}",
+            'client_kwargs = { scope = "openid email profile", prompt = "login" }',
+            'authorize_params = { kc_idp_hint = "google" }',
+            "",
+        ]
     SECRETS_FILE.parent.mkdir(exist_ok=True)
     SECRETS_FILE.write_text("\n".join(lines), encoding="utf-8")
     print(f"Configuración de st.login escrita en {SECRETS_FILE.relative_to(ROOT_DIR)}")

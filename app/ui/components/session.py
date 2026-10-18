@@ -38,21 +38,38 @@ def oidc_logged_in() -> bool:
     return auth.google_login_enabled() and bool(st.user.get("is_logged_in"))
 
 
+# Proveedores de st.login (ver scripts/write_streamlit_secrets.py). Ambos van a Google a través
+# de Keycloak; el nombre indica la intención y Streamlit lo guarda en st.user["provider"].
+GOOGLE_LOGIN = "google"
+GOOGLE_SIGNUP = "googlesignup"  # Streamlit no admite "_" en el nombre
+
+
 def sync_oidc_session() -> None:
-    """Si el usuario volvió de «Continuar con Google» (o recargó la página con la cookie de
-    sesión vigente), vincula esa identidad con su usuario de la app."""
+    """Al volver de Google (o al recargar con la cookie de sesión vigente), inicia sesión o crea
+    la cuenta según el botón que se usó: «Iniciar sesión con Google» sólo entra si la cuenta ya
+    existe; «Crear cuenta con Google» la crea si hace falta."""
     if "user_id" in st.session_state or not oidc_logged_in():
         return
+    allow_create = st.user.get("provider") == GOOGLE_SIGNUP
     try:
         with session_scope() as s:
-            user = auth.login_with_oidc(s, dict(st.user))
+            user, created = auth.login_with_oidc(s, dict(st.user), allow_create=allow_create)
             user_id, name, pending = user.id, user.display_name, user.pending_deletion
     except auth.AuthError as exc:
-        st.session_state[OIDC_ERROR] = str(exc)
+        st.session_state[OIDC_ERROR] = {
+            "message": str(exc),
+            "not_found": isinstance(exc, auth.AccountNotFoundError),
+        }
         return
     st.session_state.pop(OIDC_ERROR, None)
     st.session_state["user_id"] = user_id
-    if not pending:
+    if pending:
+        return
+    if created:
+        flash(f"¡Cuenta creada con Google! Bienvenido, {name}.", "🎉")
+    elif allow_create:
+        flash(f"Ya tenías una cuenta, {name}: iniciaste sesión.", "👋")
+    else:
         flash(f"¡Bienvenido, {name}!", "👋")
 
 
