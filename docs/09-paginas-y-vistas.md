@@ -9,6 +9,7 @@ Componentes compartidos (`app/ui/common.py`):
 | Componente | Uso |
 |------------|-----|
 | `current_user()` / `require_user()` | Recargan el usuario autenticado. Si no hay sesión, detienen el render. |
+| `ui/moderation.py`: `actions_menu()`, `report_dialog()`, `block_dialog()` | Menú «Más» con Reportar y Bloquear, y sus diálogos. Se usa en Personas, Foros y Mensajes. |
 | `run_action(fn, mensaje)` | Ejecuta una escritura en su propia transacción. Ver [Persistencia](07-persistencia.md#escritura-commonrun_action). |
 | `flash()` / `show_flashes()` | Avisos tipo *toast* que sobreviven al rerun. |
 | `avatar_html()`, `user_chip()` | Foto o iniciales, nombre visible, `@usuario` y un subtítulo. |
@@ -43,10 +44,20 @@ Es visible sólo sin sesión iniciada. Tiene dos pestañas:
 
 | Pestaña | Campos | Acción |
 |---------|--------|--------|
-| Iniciar sesión | Usuario o correo, contraseña | `auth.login` → guarda `user_id` en la sesión y muestra "¡Bienvenido…!". |
-| Crear cuenta | Nombre, apellido, usuario, correo, contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register` → "Cuenta creada". |
+| Iniciar sesión | Usuario o correo, contraseña y **código de verificación (2FA)**, que es opcional y sólo se usa si el usuario lo activó | `auth.login` → guarda `user_id` en la sesión y muestra «¡Bienvenido…!». |
+| Crear cuenta | Nombre, apellido, usuario, correo, contraseña (×2) | Verifica que las contraseñas coincidan → `auth.register`. Con Keycloak aparece «Te enviamos un enlace de activación a …». |
 
-El pie de la página indica el proveedor activo: Keycloak o base de datos local.
+- **Cuenta sin activar.** Si alguien intenta entrar sin haber activado la cuenta, aparece «Tu
+  cuenta aún no está activada» con el botón **Reenviar correo de activación**.
+- **Reenvío sin intento de login.** El expander «¿No recibiste el correo de activación?» permite
+  pedir el enlace escribiendo sólo el usuario o el correo.
+- **Pie de la página:** indica el proveedor activo (Keycloak o base de datos local).
+
+### Pantalla «Tu cuenta será eliminada»
+
+Si la cuenta tiene la eliminación programada, al iniciar sesión **sólo** se muestra esta
+pantalla (definida en `app/main.py`). Indica la fecha de borrado y ofrece **Cancelar
+eliminación** (`accounts.cancel_deletion`) o **Cerrar sesión**.
 
 **Tablas:** `users` (lectura y escritura); Keycloak, si está activo.
 
@@ -79,12 +90,18 @@ El pie de la página indica el proveedor activo: Keycloak o base de datos local.
   - 👍 / 💙: "me gusta", con `forum.toggle_like`.
   - Si soy el autor o un admin: **Marcar resuelta / Reabrir** (`forum.set_solved`) y
     **Eliminar** (`forum.delete_post`).
-- **Comentarios:** lista en orden cronológico. Cada comentario tiene botón 🗑️ si soy su autor o
+- **Reportar** (si no soy el autor): abre el diálogo de reporte con la publicación como
+  contenido reportado.
+- **Ocultamiento:** las publicaciones y comentarios de usuarios bloqueados (en cualquier
+  dirección) o con la cuenta en eliminación no se muestran, ni en la lista ni en el detalle.
+- **Comentarios:** lista en orden cronológico. Cada comentario de otra persona tiene el botón
+  🚩 para reportarlo. Cada comentario tiene botón 🗑️ si soy su autor o
   un admin (`forum.delete_comment`).
 - **Responder:** formulario "Escribe una respuesta o comentario", que llama a
   `forum.add_comment`.
 
-**Tablas:** `posts`, `comments`, `post_likes`, `follows` (filtro) y `users`.
+**Tablas:** `posts`, `comments`, `post_likes`, `follows` (filtro), `user_blocks`,
+`user_reports` y `users`.
 
 ## 📚 Plan académico (`views/academics.py`, `/academico`)
 
@@ -236,7 +253,15 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   - Botones de acción y lista de retos completados.
   - **Las notas y promedios no se muestran a otros estudiantes.**
 
-**Tablas:** `users`, `follows`, `support_messages` y `challenge_participants`.
+- **Menú «Más»** en cada persona (y en su perfil público): **Reportar** (motivo, detalles y
+  opción de bloquear también) y **Bloquear** (con una confirmación que explica sus efectos).
+- **Pestaña «Bloqueados»:** lista de personas bloqueadas, con el botón **Desbloquear**.
+- **Ocultamiento:** las personas bloqueadas, las cuentas en eliminación y las cuentas sin activar
+  no aparecen en la búsqueda ni en las listas. Su perfil público muestra «Este perfil no está
+  disponible».
+
+**Tablas:** `users`, `follows`, `support_messages`, `challenge_participants`, `user_blocks` y
+`user_reports`.
 
 ## 💌 Mensajes de apoyo (`views/messages.py`, `/mensajes`)
 
@@ -250,6 +275,9 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   "Mensajes de apoyo (2)".
 
 **Tablas:** `support_messages` y `users`.
+- **Menú «Más»** en cada mensaje recibido: permite reportar o bloquear al remitente. Los
+  mensajes de usuarios bloqueados o con la cuenta en eliminación no se muestran.
+
 
 ## 👤 Mi perfil (`views/profile.py`, `/perfil`)
 
@@ -262,9 +290,22 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   GitHub y LinkedIn (`users.update_profile`).
 - **Pestaña "Datos académicos":** universidad, código estudiantil, programa, plan, semestre
   actual y total de semestres.
-- **Pestaña "Cuenta y seguridad":** usuario (sólo lectura), cambio de correo
-  (`auth.change_email`) y cambio de contraseña con la actual, la nueva y su confirmación
-  (`auth.change_password`).
+- **Pestaña "Cuenta y seguridad":**
+  - Usuario (sólo lectura).
+  - Cambio de correo (`auth.change_email`).
+  - Cambio de contraseña: actual, nueva, confirmación y código 2FA si está activo
+    (`auth.change_password`).
+  - **Verificación en dos pasos (2FA):**
+    - Si está desactivada, muestra los pasos y el botón **Enviar enlace de configuración**
+      (`auth.request_two_factor_setup`).
+    - Si está activada, muestra el estado y el formulario **Desactivar 2FA** (contraseña +
+      código).
+- **Pestaña "Eliminar cuenta":**
+  - **Paso 1:** contraseña (+ código 2FA) → «Enviarme el código de confirmación»
+    (`accounts.request_deletion`).
+  - **Paso 2:** código del correo + casilla «Entiendo que…» → «Eliminar mi cuenta»
+    (`accounts.confirm_deletion`). Al confirmar se cierra la sesión.
+  - Ver [Cuentas y seguridad](14-cuentas-seguridad-y-moderacion.md#eliminación-de-la-cuenta-diferida-7-días).
 
 **Tablas:** `users`; Keycloak, si está activo.
 
@@ -275,11 +316,12 @@ render si no corresponde. Tiene cinco pestañas:
 
 | Pestaña | Contenido |
 |---------|-----------|
-| **Resumen** | 12 métricas globales; gráfica de **actividad de los últimos 30 días**; **histograma** del promedio general con la línea de aprobación; tabla de **estudiantes en riesgo**; tabla de retos con la barra de tasa de éxito. |
+| **Resumen** | 15 métricas globales (incluye reportes pendientes, cuentas por eliminar y cuentas sin activar); gráfica de **actividad de los últimos 30 días**; **histograma** del promedio general con la línea de aprobación; tabla de **estudiantes en riesgo**; tabla de retos con la barra de tasa de éxito. |
 | **Estudiante** | Selector de usuario y todo su detalle: datos personales y de cuenta, alerta si está en riesgo, 7 métricas, promedio por semestre (barras), tabla de materias (con categoría), **gráfica de avance de créditos por categoría**, ítems calificados, retos con su evidencia, publicaciones y red social. |
 | **Grupos** | Filtros por programa, semestre y estudiantes específicos. Muestra métricas del grupo (cantidad, promedio, en riesgo, retos, publicaciones, apoyos), barras horizontales del promedio por estudiante (rojo si está en riesgo), **ranking del grupo**, tabla completa y descarga en **CSV**. |
 | **Contenido** | Selector entre Publicaciones, Comentarios, Retos y Mensajes; tabla completa y eliminación por id. |
-| **Usuarios** | Tabla de todos los usuarios; selector para cambiar el rol (estudiante o administrador) y habilitar o deshabilitar la cuenta. Con Keycloak, la cuenta también se deshabilita allá. Un admin no puede cambiar su propio rol ni deshabilitarse a sí mismo. |
+| **Reportes** | El título muestra los pendientes, p. ej. «Reportes (2)». Filtro por estado (Pendientes, Resueltos, Descartados, Todos), tabla de reportes y revisión de cada uno: contenido reportado, nota y acciones **Resolver**, **Descartar**, **Eliminar contenido** y **Deshabilitar usuario**. Ver [Cuentas y moderación](14-cuentas-seguridad-y-moderacion.md#reportar-usuarios-y-contenido). |
+| **Usuarios** | Tabla de todos los usuarios; selector para cambiar el rol (estudiante o administrador) y habilitar o deshabilitar la cuenta. Con Keycloak, la cuenta también se deshabilita allá. Un admin no puede cambiar su propio rol ni deshabilitarse a sí mismo. La tabla incluye correo verificado, fecha de eliminación programada y reportes recibidos. Si la cuenta tiene eliminación programada, se puede **cancelar**. |
 
 **Servicios:** `admin.*`, `academics`, `forum.delete_*`, `challenges.delete_challenge`,
 `auth.set_active` y `challenges.leaderboard`. **Tablas:** todas.

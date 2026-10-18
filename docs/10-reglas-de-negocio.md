@@ -183,3 +183,31 @@ está en el grupo filtrado, nadie del grupo recibe ese bonus.
   y en el caso de los seguimientos también un `CHECK` en la BD.
 - Seguir a alguien es idempotente.
 - Los mensajes de apoyo se marcan como leídos al abrir la bandeja.
+
+## Cuentas
+
+| Regla | Valor |
+|-------|-------|
+| Activación de la cuenta (Keycloak) | Obligatoria con el enlace del correo antes del primer login. |
+| Código para eliminar la cuenta | 6 dígitos, válido **15 minutos**, máximo **5 intentos**. Pedir uno nuevo invalida el anterior. |
+| Plazo de eliminación | `ACCOUNT_DELETION_DAYS` (7 por defecto) desde la confirmación. |
+| Cuenta con eliminación programada | Oculta para los demás (perfil, contenido, mensajes, rankings). Al iniciar sesión sólo puede cancelar. |
+| Purga | Al vencer el plazo, se borra en Keycloak y en la app, con todo su contenido en cascada. |
+| 2FA (Keycloak) | TOTP de 6 dígitos cada 30 s. Un código no se puede reutilizar. Se pide en el login, al cambiar la contraseña, al pedir la eliminación y al desactivar el 2FA. |
+| Fuerza bruta (Keycloak) | Varios intentos fallidos en poco tiempo bloquean temporalmente la cuenta. |
+
+## Bloqueos y reportes
+
+- **Bloquear:**
+  - Es unilateral al crearse, pero sus efectos son **bidireccionales**.
+  - Al bloquear se borran los seguimientos mutuos.
+  - Mientras dure el bloqueo no se puede seguir ni enviar mensajes de apoyo en ningún sentido.
+- **Contenido oculto para quien mira** (`hidden_user_ids`): bloqueos en ambas direcciones +
+  cuentas en eliminación. El conteo de comentarios en la lista del foro incluye los comentarios
+  ocultos.
+- **Reportar:**
+  - No se puede reportar a uno mismo.
+  - Si el motivo es «otro», la descripción es obligatoria.
+  - No se puede repetir un reporte pendiente idéntico.
+- **Cerrar un reporte:** sólo los administradores lo resuelven o descartan, y queda registrado
+  quién y cuándo lo hizo.
