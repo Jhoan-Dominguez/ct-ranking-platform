@@ -35,7 +35,7 @@ def make_user(session):
         return auth.register(
             session,
             username=kwargs.pop("username", f"user{n}"),
-            email=kwargs.pop("email", f"user{n}@test.co"),
+            email=kwargs.pop("email", f"user{n}@{auth.student_domain()}"),
             password=kwargs.pop("password", "Secret123"),
             first_name="Test",
             last_name=f"User{n}",

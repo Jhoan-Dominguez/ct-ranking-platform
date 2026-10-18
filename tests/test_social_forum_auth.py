@@ -4,9 +4,11 @@ from app.services import admin, auth, forum, social, users
 
 
 def test_register_and_login_local(session, make_user):
-    user = make_user(username="maria", email="maria@test.co", password="Clave1234")
+    user = make_user(
+        username="maria", email="maria@estudiantes.areandina.edu.co", password="Clave1234"
+    )
     assert auth.login(session, "maria", "Clave1234").id == user.id
-    assert auth.login(session, "MARIA@test.co", "Clave1234").id == user.id
+    assert auth.login(session, "MARIA@estudiantes.areandina.edu.co", "Clave1234").id == user.id
     with pytest.raises(auth.AuthError):
         auth.login(session, "maria", "otra12345")
     with pytest.raises(auth.AuthError, match="registrados"):
@@ -82,3 +84,27 @@ def test_admin_students_frame_flags_risk(session, make_user):
     assert row["promedio_general"] == pytest.approx(2.0)
     assert bool(row["en_riesgo"]) is True
     assert admin.global_metrics(session).users == 1
+
+
+def test_students_must_use_institutional_domain(session, make_user):
+    assert auth.student_email(" Laura.Gomez ") == "laura.gomez@estudiantes.areandina.edu.co"
+    for bad in ("laura@gmail.com", "laura gomez", ".laura", "laura..gomez", ""):
+        with pytest.raises(auth.AuthError):
+            auth.student_email(bad)
+    with pytest.raises(auth.AuthError, match="institucional"):
+        make_user(email="laura@gmail.com")
+    with pytest.raises(auth.AuthError, match="institucional"):
+        make_user(email="laura@areandina.edu.co")  # otro subdominio
+    student = make_user(email="sofi@estudiantes.areandina.edu.co")
+    with pytest.raises(auth.AuthError, match="institucional"):
+        auth.change_email(session, student, "sofi@gmail.com")
+    auth.change_email(session, student, "sofia.h@estudiantes.areandina.edu.co")
+    assert student.email == "sofia.h@estudiantes.areandina.edu.co"
+
+
+def test_admins_are_exempt_from_student_domain(session, make_user):
+    from app.db.models import Role
+
+    admin = make_user(email="soporte@ctranking.local", role=Role.ADMIN)
+    auth.change_email(session, admin, "admin2@ctranking.local")
+    assert admin.email == "admin2@ctranking.local"
