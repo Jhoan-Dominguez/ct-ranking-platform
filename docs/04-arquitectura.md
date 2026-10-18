@@ -15,7 +15,8 @@
 | Plotly | 7.1 | Gráficas interactivas (promedios, avance de créditos, actividad, histogramas). |
 | Pillow | 12.3 | Recorte y redimensionamiento de las fotos de perfil. |
 | python-dotenv | 1.2 | Carga de `.env`. |
-| Docker Compose | v2 | Orquestación de PostgreSQL y Keycloak. |
+| Docker Compose | v2 | Orquestación de PostgreSQL, Keycloak y Mailpit. |
+| Mailpit | 1.31 | SMTP de desarrollo: atrapa los correos y los muestra en una bandeja web. |
 | pytest | 9.1 | Pruebas automáticas. |
 | ruff · isort · pre-commit | 0.17 · 9.0 · 4.7 | Linter y formateador, orden de imports y hooks de Git. |
 
@@ -89,10 +90,16 @@ ct-ranking-platform/
 │   │   ├── academics.py        # Materias, ítems, promedios, créditos, pensum
 │   │   ├── challenges.py       # Retos, participación, ranking, leaderboard
 │   │   ├── challenge_rules.py  # Reglas de verificación automática
-│   │   └── admin.py            # Métricas y consultas del panel
+│   │   ├── admin.py            # Métricas y consultas del panel
+│   │   ├── accounts.py         # Eliminación diferida de cuentas con doble verificación
+│   │   ├── moderation.py       # Bloqueos y reportes
+│   │   └── mailer.py           # Envío de correos (SMTP o memoria)
 │   ├── ui/
 │   │   ├── common.py           # Sesión del usuario, run_action, avatares, banners
+│   │   ├── moderation.py       # Diálogos y menú «Más» para reportar y bloquear
 │   │   └── sidebar_hover.js    # Expande el menú lateral oculto al pasar el mouse
+│   ├── jobs/
+│   │   └── purge_accounts.py   # Purga de cuentas vencidas (hilo y CLI)
 │   └── views/                  # Una página por archivo: render()
 │       ├── login.py  home.py  forum.py  academics.py  challenges.py
 │       └── community.py  messages.py  profile.py  admin.py
@@ -100,7 +107,9 @@ ct-ranking-platform/
 │   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
 │   └── postgres/01-create-keycloak-db.sql
 ├── docs/                       # Esta documentación (+ pensum.png)
-├── scripts/wait_for_services.py
+├── scripts/
+│   ├── wait_for_services.py    # Espera a PostgreSQL y Keycloak (make up)
+│   └── configure_keycloak.py   # SMTP del realm y URLs de la app (make up)
 ├── tests/                      # Pruebas con pytest (SQLite en memoria)
 ├── .streamlit/config.toml
 ├── docker-compose.yml  Makefile  pyproject.toml  .pre-commit-config.yaml
@@ -151,6 +160,9 @@ sequenceDiagram
 | `post_id` | `views/forum.py` | Publicación abierta en vista de detalle. |
 | `profile_id` | `views/community.py` | Perfil público que se está viendo. |
 | `challenge_id` | `views/challenges.py` | Reto cuyo ranking muestra el banner derecho. |
+| `_unverified_login`, `_registered_email` | `views/login.py` | Aviso de cuenta sin activar (con el botón de reenvío) y aviso tras registrarse. |
+| `_deletion_code_sent` | `views/profile.py` | Paso 2 de la eliminación de la cuenta (código enviado). |
+| `_academics_open_expanders` | `views/academics.py` | Menús abiertos del plan académico. |
 | `pensum_program`, `support_tpl`, `support_msg`, … | widgets con `key` | Estado de widgets concretos. |
 
 El estado de sesión vive en la memoria del servidor y está asociado a la conexión WebSocket del
@@ -162,6 +174,10 @@ navegador. **Al recargar la página se pierde** y el usuario debe volver a inici
 archivos):
 
 - **Sin usuario:** se muestra únicamente `login.render`, con la navegación oculta.
+- **Usuario con eliminación programada:** se muestra únicamente la pantalla «Tu cuenta será
+  eliminada», con los botones Cancelar eliminación y Cerrar sesión.
+- **Tarea en segundo plano:** al arrancar, `main.py` llama a `start_background_purge()`. Esto
+  inicia, una vez por proceso, el hilo que purga cada hora las cuentas vencidas.
 - **Con usuario:**
   - *Plataforma:* Inicio (`/inicio`), Foros (`/foros`), Plan académico (`/academico`),
     Retos (`/retos`).
@@ -181,7 +197,7 @@ indica ejecutar `make up` y `make init-db`.
 
 | Tipo | Dónde se origina | Cómo se muestra |
 |------|------------------|-----------------|
-| Errores de dominio: `AuthError`, `AcademicError`, `ChallengeError`, `ForumError`, `SocialError`, `ProfileError` | Validaciones en servicios | `run_action` los captura y muestra `st.error(mensaje)`. La transacción hace rollback. |
+| Errores de dominio: `AuthError` (y `EmailNotVerifiedError`), `AccountError`, `MailError`, `ModerationError`, `AcademicError`, `ChallengeError`, `ForumError`, `SocialError`, `ProfileError` | Validaciones en servicios | `run_action` los captura y muestra `st.error(mensaje)`. La transacción hace rollback. |
 | Errores de conexión a la BD (`OperationalError`) | `current_user()` en `main.py` | Mensaje con las instrucciones para levantar los servicios. |
 | Errores de conexión a Keycloak | `KeycloakClient` | Se convierten en `AuthError("No fue posible contactar…")`. |
 | Errores inesperados | Cualquier lugar | Streamlit los muestra con su traza (modo desarrollo). |

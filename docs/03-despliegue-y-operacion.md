@@ -8,9 +8,12 @@ flowchart LR
     app -- "SQL (psycopg) :5432" --> db[("PostgreSQL 16<br/>contenedor db")]
     app -- "HTTP :8180<br/>token + admin API" --> kc["Keycloak 26.4<br/>contenedor keycloak"]
     kc -- "JDBC (red interna)" --> db
+    app -- "SMTP :1025<br/>códigos y avisos" --> mail[("Mailpit<br/>bandeja web :8025")]
+    kc -- "SMTP (red interna)<br/>activación y 2FA" --> mail
     subgraph docker compose: ct-ranking
         db
         kc
+        mail
     end
 ```
 
@@ -49,6 +52,15 @@ Durante la importación, Keycloak reemplaza los *placeholders* `${KEYCLOAK_CLIEN
 `${APP_ADMIN_USERNAME}`, `${APP_ADMIN_EMAIL}` y `${APP_ADMIN_PASSWORD}` del JSON del realm con
 las variables de entorno del contenedor.
 
+### `mailpit`: SMTP de desarrollo
+
+| Propiedad | Valor |
+|-----------|-------|
+| Imagen | `axllent/mailpit:v1.31.3` |
+| Puertos | `${SMTP_PORT:-1025}:1025` (SMTP) y `${MAILPIT_UI_PORT:-8025}:8025` (web) |
+| Uso | Atrapa **todos** los correos de Keycloak y de la app, y los muestra en http://localhost:8025 sin enviarlos. |
+| Producción | Se reemplaza por un SMTP real cambiando las variables `SMTP_*` y `KEYCLOAK_SMTP_*` (ver [Cuentas y seguridad](14-cuentas-seguridad-y-moderacion.md#correo-mailpit-y-smtp)). |
+
 ## Comandos de operación (`make help`)
 
 | Comando | Qué hace |
@@ -56,7 +68,7 @@ las variables de entorno del contenedor.
 | `make create` | `.env`, dependencias en `.venv` e instalación de los hooks de pre-commit. |
 | `make env` | Crea `.env` desde `.env.example` si no existe. |
 | `make install` | Instala o actualiza las dependencias de `requirements-dev.txt`. |
-| `make up` | Levanta los contenedores, espera a que estén listos y ejecuta `init_db`. |
+| `make up` | Levanta los contenedores, espera a que estén listos, configura Keycloak (`scripts/configure_keycloak.py`) y ejecuta `init_db`. |
 | `make run` | Ejecuta Streamlit en `APP_PORT` (por defecto 8501). |
 | `make dev` | `make up` + `make run`. |
 | `make down` | Detiene y elimina los contenedores. **Conserva** los volúmenes (datos). |
@@ -66,6 +78,7 @@ las variables de entorno del contenedor.
 | `make init-db` | Crea las tablas que falten y los datos base (idempotente). |
 | `make seed-demo` | Carga los datos de demostración (idempotente). |
 | `make reset-db` | **Borra y recrea** todas las tablas de la app. No toca Keycloak. |
+| `make purge-accounts` | Borra definitivamente las cuentas cuyo plazo de eliminación venció (en la app y en Keycloak). |
 | `make test` | Ejecuta pytest. |
 | `make lint` | `pre-commit run --all-files`. |
 | `make format` | isort + `ruff check --fix` + `ruff format`. |
@@ -92,6 +105,7 @@ make destroy && make up && make seed-demo
 |---------|---------------|--------------------------|
 | Plataforma | http://localhost:8501 | `admin` / `Admin123!` o usuarios demo / `Demo1234` |
 | Consola de Keycloak | http://localhost:8180 → realm `ct-ranking` | `admin` / `admin` |
+| Correos (Mailpit) | http://localhost:8025 | sin credenciales |
 | PostgreSQL (psql) | `docker compose exec db psql -U ctranking -d ctranking` | `ctranking` / `ctranking` |
 | BD de Keycloak | `docker compose exec db psql -U ctranking -d keycloak` | igual |
 
@@ -136,3 +150,8 @@ El proyecto está configurado para desarrollo local. Para publicarlo:
    - Antes de tener datos reales conviene incorporar **Alembic**. Ver
      [Persistencia](07-persistencia.md#evolución-del-esquema).
 6. **Respaldos programados** de ambas bases de datos (ver arriba).
+7. **Correo real.** Reemplazar Mailpit por un SMTP real (`SMTP_*` y `KEYCLOAK_SMTP_*`) y
+   ejecutar `make up` para reconfigurar Keycloak.
+8. **Purga de cuentas.** El hilo de la app corre cada hora mientras la app esté en ejecución.
+   Para no depender de ello, conviene programar `python -m app.jobs.purge_accounts` con cron
+   o un timer de systemd.

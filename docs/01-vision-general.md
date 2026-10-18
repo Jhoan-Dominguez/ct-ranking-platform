@@ -22,9 +22,10 @@ y detectar a tiempo a quienes están en riesgo académico.
 | Plan académico | 📚 Plan académico | Plan de estudios por semestres, materias con categoría y créditos, ítems calificables, promedios, gráficas de avance de créditos por categoría y de evolución del promedio, carga de pensum y botones para expandir o colapsar todos los menús. |
 | Retos | 🏆 Retos | Retos globales con verificación automática y retos creados por estudiantes; ranking por reto y ranking general. |
 | Personas | 👥 Personas | Búsqueda de estudiantes, seguir y dejar de seguir, perfil público y mensajes de apoyo. |
-| Mensajes | 💌 Mensajes de apoyo | Bandeja de recibidos y enviados. |
-| Perfil | 👤 Mi perfil | Datos personales y académicos, foto, correo y contraseña. |
-| Administración | 🛡️ Panel de administrador | Métricas globales, detalle por estudiante, análisis de grupos, moderación y gestión de usuarios. |
+| Mensajes | 💌 Mensajes de apoyo | Bandeja de recibidos y enviados, con opción de reportar o bloquear al remitente. |
+| Moderación | (en Personas, Foros y Mensajes) | **Reportar** usuarios, publicaciones y comentarios; **bloquear** usuarios. |
+| Perfil | 👤 Mi perfil | Datos personales y académicos, foto, correo, contraseña, **verificación en dos pasos (2FA con QR)** y **eliminación de la cuenta** (diferida 7 días). |
+| Administración | 🛡️ Panel de administrador | Métricas globales, detalle por estudiante, análisis de grupos, moderación de contenido, **gestión de reportes** y gestión de usuarios. |
 
 La navegación está en el **menú lateral** izquierdo. Se puede ocultar, y estando oculto se
 expande al pasar el mouse por el borde izquierdo de la ventana.
@@ -61,3 +62,8 @@ Ver [Autenticación](05-autenticacion.md#roles).
 | **Ranking / leaderboard** | Orden de usuarios por puntos de retos completados, con bonus para quien termina primero. |
 | **Estudiante en riesgo** | Estudiante cuyo promedio general o del semestre actual es menor que la nota mínima aprobatoria. |
 | **Mensaje de apoyo** | Mensaje corto de ánimo enviado a otro usuario. |
+| **Activación de cuenta** | Verificación del correo con el enlace que envía Keycloak al registrarse. |
+| **2FA / TOTP** | Verificación en dos pasos: un código de 6 dígitos de una app autenticadora, que se configura escaneando un QR. |
+| **Eliminación programada** | Cuenta desactivada que se borrará definitivamente al vencer el plazo (7 días). |
+| **Bloqueo** | Relación que oculta el contenido entre dos usuarios e impide el contacto. |
+| **Reporte** | Aviso a la administración sobre un usuario o un contenido, con un motivo. |
