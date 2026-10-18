@@ -6,6 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import Follow, SupportMessage, User
+from app.services import moderation
 
 SUPPORT_TEMPLATES = [
     "¡Vamos, tú puedes! 💪",
@@ -27,6 +28,8 @@ def follow(session: Session, follower_id: int, followed_id: int) -> None:
         raise SocialError("No puedes seguirte a ti mismo.")
     if session.get(User, followed_id) is None:
         raise SocialError("Usuario no encontrado.")
+    if moderation.is_blocked_between(session, follower_id, followed_id):
+        raise SocialError("No puedes seguir a esta persona.")
     if not is_following(session, follower_id, followed_id):
         session.add(Follow(follower_id=follower_id, followed_id=followed_id))
         session.flush()
@@ -87,14 +90,18 @@ def send_support(session: Session, sender_id: int, recipient_id: int, message: s
         raise SocialError(f"El mensaje supera {MAX_MESSAGE_LEN} caracteres.")
     if session.get(User, recipient_id) is None:
         raise SocialError("Usuario no encontrado.")
+    if moderation.is_blocked_between(session, sender_id, recipient_id):
+        raise SocialError("No puedes enviar mensajes a esta persona.")
     session.add(SupportMessage(sender_id=sender_id, recipient_id=recipient_id, message=message))
     session.flush()
 
 
 def inbox(session: Session, user_id: int, limit: int = 100) -> list[SupportMessage]:
+    """Mensajes recibidos, sin los de usuarios bloqueados o en proceso de eliminación."""
+    hidden = moderation.hidden_user_ids(session, user_id)
     stmt = (
         select(SupportMessage)
-        .where(SupportMessage.recipient_id == user_id)
+        .where(SupportMessage.recipient_id == user_id, SupportMessage.sender_id.not_in(hidden))
         .options(selectinload(SupportMessage.sender))
         .order_by(SupportMessage.created_at.desc())
         .limit(limit)
@@ -118,7 +125,11 @@ def unread_count(session: Session, user_id: int) -> int:
         session.scalar(
             select(func.count())
             .select_from(SupportMessage)
-            .where(SupportMessage.recipient_id == user_id, SupportMessage.is_read.is_(False))
+            .where(
+                SupportMessage.recipient_id == user_id,
+                SupportMessage.is_read.is_(False),
+                SupportMessage.sender_id.not_in(moderation.hidden_user_ids(session, user_id)),
+            )
         )
         or 0
     )

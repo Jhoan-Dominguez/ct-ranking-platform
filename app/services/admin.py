@@ -18,9 +18,11 @@ from app.db.models import (
     Follow,
     GradeItem,
     Post,
+    ReportStatus,
     Subject,
     SupportMessage,
     User,
+    UserReport,
 )
 from app.services import academics, challenges, social
 
@@ -39,6 +41,9 @@ class GlobalMetrics:
     messages: int
     follows: int
     grade_items: int
+    pending_reports: int
+    pending_deletions: int
+    unverified_users: int
 
 
 def _count(session: Session, model, *where) -> int:
@@ -62,6 +67,9 @@ def global_metrics(session: Session) -> GlobalMetrics:
         messages=_count(session, SupportMessage),
         follows=_count(session, Follow),
         grade_items=_count(session, GradeItem),
+        pending_reports=_count(session, UserReport, UserReport.status == ReportStatus.PENDING),
+        pending_deletions=_count(session, User, User.deletion_scheduled_for.is_not(None)),
+        unverified_users=_count(session, User, User.email_verified.is_(False)),
     )
 
 
@@ -79,6 +87,7 @@ def students_frame(session: Session, user_ids: set[int] | None = None) -> pd.Dat
     posts = counts(Post.id, Post.author_id)
     comments = counts(Comment.id, Comment.author_id)
     msgs_received = counts(SupportMessage.id, SupportMessage.recipient_id)
+    reports = counts(UserReport.id, UserReport.reported_id)
     followers = counts(Follow.follower_id, Follow.followed_id)
     completed = dict(
         session.execute(
@@ -102,6 +111,9 @@ def students_frame(session: Session, user_ids: set[int] | None = None) -> pd.Dat
                 "semestre": u.current_semester,
                 "rol": u.role,
                 "activo": u.is_active,
+                "verificado": u.email_verified,
+                "eliminacion_programada": u.deletion_scheduled_for,
+                "reportes_recibidos": reports.get(u.id, 0),
                 "promedio_general": summary.general_average,
                 "promedio_semestre": summary.current_semester_average,
                 "materias_cursando": summary.in_progress,

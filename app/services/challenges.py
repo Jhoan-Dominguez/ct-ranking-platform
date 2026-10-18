@@ -169,7 +169,12 @@ def create_challenge(
 
 
 def list_challenges(
-    session: Session, user: User, *, scope: str = "all", only_open: bool = False
+    session: Session,
+    user: User,
+    *,
+    scope: str = "all",
+    only_open: bool = False,
+    hidden_creator_ids: set[int] | None = None,
 ) -> list[ChallengeRow]:
     stmt = (
         select(Challenge)
@@ -186,7 +191,11 @@ def list_challenges(
         stmt = stmt.where(Challenge.creator_id.in_(followed), Challenge.kind == ChallengeKind.USER)
     elif scope == "mine":
         stmt = stmt.where(Challenge.creator_id == user.id)
-    elif scope == "joined":
+    if hidden_creator_ids:
+        stmt = stmt.where(
+            or_(Challenge.creator_id.is_(None), Challenge.creator_id.not_in(hidden_creator_ids))
+        )
+    if scope == "joined":
         joined = select(ChallengeParticipant.challenge_id).where(
             ChallengeParticipant.user_id == user.id
         )
@@ -318,7 +327,11 @@ def stats(session: Session, challenge_id: int) -> ChallengeStats:
 
 
 def leaderboard(
-    session: Session, *, limit: int = 10, user_ids: set[int] | None = None
+    session: Session,
+    *,
+    limit: int = 10,
+    user_ids: set[int] | None = None,
+    exclude_ids: set[int] | None = None,
 ) -> list[LeaderboardEntry]:
     """Puntos totales: suma de puntos de retos completados + bonus por llegar primero."""
     rows = session.execute(
@@ -339,6 +352,8 @@ def leaderboard(
     users: dict[int, User] = {}
     for part, ch in rows:
         if user_ids is not None and part.user_id not in user_ids:
+            continue
+        if exclude_ids and part.user_id in exclude_ids:
             continue
         users[part.user_id] = part.user
         score[part.user_id] += ch.points

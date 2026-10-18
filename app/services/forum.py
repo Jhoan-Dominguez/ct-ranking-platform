@@ -57,6 +57,7 @@ def list_posts(
     category: str | None = None,
     solved: bool | None = None,
     author_ids: set[int] | None = None,
+    exclude_author_ids: set[int] | None = None,
     order: str = "recent",
     limit: int = 100,
 ) -> list[PostRow]:
@@ -80,6 +81,8 @@ def list_posts(
         stmt = stmt.where(Post.is_solved.is_(solved))
     if author_ids is not None:
         stmt = stmt.where(Post.author_id.in_(author_ids))
+    if exclude_author_ids:
+        stmt = stmt.where(Post.author_id.not_in(exclude_author_ids))
     order_by = {
         "comments": (n_comments.desc(), Post.created_at.desc()),
         "likes": (n_likes.desc(), Post.created_at.desc()),

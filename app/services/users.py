@@ -90,11 +90,24 @@ def set_avatar(user: User, raw: bytes | None) -> None:
 
 
 def search_users(
-    session: Session, query: str = "", *, exclude_id: int | None = None, limit: int = 50
+    session: Session,
+    query: str = "",
+    *,
+    exclude_id: int | None = None,
+    hidden_ids: set[int] | None = None,
+    limit: int = 50,
 ) -> list[User]:
-    stmt = select(User).where(User.is_active.is_(True))
+    """Usuarios activos con la cuenta verificada. ``hidden_ids`` excluye, por ejemplo,
+    bloqueos y cuentas en proceso de eliminación."""
+    stmt = select(User).where(
+        User.is_active.is_(True),
+        User.email_verified.is_(True),
+        User.deletion_scheduled_for.is_(None),
+    )
     if exclude_id is not None:
         stmt = stmt.where(User.id != exclude_id)
+    if hidden_ids:
+        stmt = stmt.where(User.id.not_in(hidden_ids))
     if query.strip():
         like = f"%{query.strip().lower()}%"
         stmt = stmt.where(
