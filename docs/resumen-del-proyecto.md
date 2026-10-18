@@ -13,7 +13,7 @@ entre sí. Un panel de administrador permite hacer seguimiento a un estudiante o
 ```
 ┌────────────────────┐   ROPC / Admin API   ┌──────────────────────┐
 │ Streamlit (app/)   │ ───────────────────► │ Keycloak 26 (docker) │
-│  views → services  │                      │  realm ct-ranking    │
+│  pages → services  │                      │  realm ct-ranking    │
 │        ↓           │                      └──────────┬───────────┘
 │   SQLAlchemy 2     │                                 │ BD "keycloak"
 └─────────┬──────────┘                                 ▼
@@ -24,14 +24,14 @@ entre sí. Un panel de administrador permite hacer seguimiento a un estudiante o
 
 | Capa | Carpeta | Responsabilidad |
 |------|---------|-----------------|
-| Configuración | `app/config.py` | Lee `.env` (BD, Keycloak, escala de notas). |
+| Configuración | `app/core/config.py` | Lee `.env` (BD, Keycloak, escala de notas). |
 | Datos | `app/db/` | Modelos ORM (`models.py`), sesión (`session.py`), creación del esquema y datos base (`init_db.py`), datos demo (`demo_data.py`). |
 | Lógica de negocio | `app/services/` | Reglas y validaciones, sin dependencias de Streamlit. Es lo que cubren las pruebas. |
-| Interfaz | `app/views/`, `app/ui/` | Una vista por página y componentes compartidos (avatares, banners de ranking, `run_action`). |
+| Interfaz | `app/ui/pages/`, `app/ui/` | Una vista por página y componentes compartidos (avatares, banners de ranking, `run_action`). |
 | Entrada | `app/main.py` | Navegación (`st.navigation`), barra lateral y control de sesión. |
 
 **Patrón de escritura en la UI:** cada acción del usuario se ejecuta con
-`common.run_action(fn, mensaje)`, que abre su propia transacción. Si la acción lanza un error de
+`actions.run_action(fn, mensaje)` (`app/ui/components/actions.py`), que abre su propia transacción. Si la acción lanza un error de
 negocio, se muestra el mensaje. Si todo va bien, se programa un aviso (toast) y la página se
 recarga.
 
@@ -218,6 +218,8 @@ intercambiables con `AUTH_PROVIDER`:
 - **Activación de cuentas por correo**, **2FA con QR**, **eliminación diferida de cuentas** con
   doble verificación, y **reportes y bloqueos** con gestión desde el panel de administrador.
 - Proveedor de autenticación **local** alternativo a Keycloak.
+- **Correo institucional obligatorio** (`@estudiantes.areandina.edu.co`) e **inicio de sesión con
+  Google** para cuentas institucionales (gratuito, vía Keycloak).
 - **Datos de demostración** (`make seed-demo`). Ocho estudiantes de Ingeniería de Software en
   distintos niveles: recién ingresados (semestre 1), iniciando (2–3), a mitad de carrera (5–6) y
   a punto de terminar (8–9). Tienen historia académica completa con notas, materias repetidas y
@@ -278,7 +280,7 @@ make down        # detiene los contenedores (conserva datos)
 - El 2FA y la activación por correo sólo funcionan con `AUTH_PROVIDER=keycloak`. El proveedor
   local no los tiene.
 - El pensum no indica créditos. Los créditos y categorías se asignaron como estimación en
-  `app/data/pensums.py`.
+  `app/database/seeds/pensums.py`.
 - La evidencia de retos manuales es auto-declarada. Se podría agregar la validación del creador
   del reto.
 - **Otras ideas:**
