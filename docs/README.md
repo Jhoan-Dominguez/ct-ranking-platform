@@ -22,7 +22,7 @@ funcional del proyecto.
 | 12 | [Desarrollo, calidad y pruebas](12-desarrollo-y-pruebas.md) | Flujo de trabajo, pre-commit (isort y ruff), pruebas y cómo extender la plataforma. |
 | 13 | [Solución de problemas](13-solucion-de-problemas.md) | Errores frecuentes y cómo resolverlos. |
 | 14 | [Cuentas, seguridad y moderación](14-cuentas-seguridad-y-moderacion.md) | Activación por correo, 2FA con QR, eliminación diferida, bloqueos, reportes y correo (Mailpit/SMTP). |
-| 15 | [Inicio de sesión con Google](15-inicio-sesion-con-google.md) | Cómo funciona «Continuar con Google», su costo (gratuito) y cómo crear las credenciales. |
+| 15 | [Inicio de sesión con Google](15-inicio-sesion-con-google.md) | Crear cuenta e iniciar sesión con Google, qué datos se obtienen y dónde se guardan, costo (gratuito) y cómo crear las credenciales. |
 
 ## Inicio rápido
 

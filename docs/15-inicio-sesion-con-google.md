@@ -1,7 +1,13 @@
 # 15. Inicio de sesión con Google
 
-La pantalla de login ofrece, además del formulario de usuario y contraseña, el botón
-**«Continuar con Google»**. Sólo se aceptan **cuentas de Google institucionales**
+La pantalla de login ofrece dos acciones con Google, además del formulario de usuario y
+contraseña:
+
+| Botón | Pestaña | Qué hace |
+|-------|---------|----------|
+| **Crear cuenta con Google** | *Crear cuenta* | Crea la cuenta en CT Ranking con el nombre y el correo de Google. La cuenta queda activada de inmediato. Si ya existía, simplemente inicia sesión. |
+| **Iniciar sesión con Google** | *Iniciar sesión* | Entra **sólo si la cuenta ya existe**, ya sea creada con Google o con el formulario usando el mismo correo. Si no existe, muestra «No existe una cuenta… Créala primero» con el botón **Crear cuenta con Google**. |
+ Sólo se aceptan **cuentas de Google institucionales**
 (`@estudiantes.areandina.edu.co`). Los correos de Areandina están en **Google Workspace**: sus
 registros MX públicos apuntan a `aspmx.l.google.com`, así que cada estudiante ya tiene una cuenta
 de Google con su correo institucional.
@@ -24,35 +30,74 @@ sequenceDiagram
     participant A as App (Streamlit)
     participant K as Keycloak (realm ct-ranking)
     participant G as Google
-    U->>A: «Continuar con Google»
-    A->>K: st.login("google") → /auth?…&kc_idp_hint=google
-    K->>G: redirección directa a Google (sin la página de Keycloak)
+    U->>A: «Crear cuenta con Google» → st.login("googlesignup")<br/>o «Iniciar sesión con Google» → st.login("google")
+    A->>K: /auth?…&kc_idp_hint=google (código de autorización OIDC)
+    K->>G: redirección directa a Google
     U->>G: elige su cuenta @estudiantes.areandina.edu.co
-    G-->>K: código → Keycloak valida el dominio (hostedDomain)
-    K->>K: primer ingreso: crea el usuario (username = parte antes de la @)
-    K-->>A: /oauth2callback con el código → tokens OIDC
-    A->>A: st.user (claims) → auth.login_with_oidc: valida dominio y correo verificado,<br/>crea o vincula el usuario local por keycloak_id
-    A-->>U: «¡Bienvenido…!» (la sesión persiste al recargar: cookie firmada)
+    G-->>K: ID token de Google → Keycloak exige hd = estudiantes.areandina.edu.co
+    K->>K: busca el usuario por la identidad federada;<br/>si no existe, lo crea (username = parte antes de la @)
+    K-->>A: /oauth2callback → tokens OIDC de Keycloak
+    A->>A: Streamlit guarda los claims + provider en una cookie firmada (st.user)
+    A->>A: sync_oidc_session(): provider "googlesignup" → crear si falta<br/>provider "google" → sólo si la cuenta existe
+    A-->>U: entra · o «No existe una cuenta… Créala primero»
 ```
+
+**¿Cómo sabe la app qué botón se usó?**
+
+- El botón se usó en otra página y la sesión de Streamlit se pierde en la redirección.
+- Por eso hay **dos proveedores** de `st.login` idénticos: `google` y `googlesignup`. Streamlit
+  no admite «_» en el nombre.
+- Ambos van al mismo Keycloak y al mismo Google. El nombre del proveedor queda en
+  `st.user["provider"]` y le indica a la app la intención.
+
+**Qué pasa con Keycloak cuando alguien sin cuenta pulsa «Iniciar sesión con Google»:**
+
+- Keycloak crea su propio usuario al volver de Google (es su flujo *first broker login*).
+- Si la app rechaza el ingreso, **borra ese usuario de Keycloak**
+  (`KeycloakClient.delete_broker_only_user`) para no dejar cuentas huérfanas.
+- Sólo borra usuarios que tienen identidad de Google y **no tienen contraseña**, así que nunca
+  toca una cuenta creada con el formulario.
 
 | Pieza | Dónde | Qué hace |
 |-------|-------|----------|
-| Botón y retorno | `app/ui/pages/login.py`, `app/ui/components/session.py` | `st.login("google")` y, al volver, `sync_oidc_session()`, que llama a `auth.login_with_oidc`. Si la cuenta no es institucional, muestra el error y el botón «Usar otra cuenta de Google». |
-| Configuración de `st.login` | `.streamlit/secrets.toml` (generado) | Lo genera `scripts/write_streamlit_secrets.py` desde `.env`: `redirect_uri` = `APP_URL/oauth2callback`, la cookie firmada con `AUTH_COOKIE_SECRET` (o uno aleatorio que se conserva) y el proveedor `google`, que apunta a Keycloak con `authorize_params = { kc_idp_hint = "google" }`. El archivo está en `.gitignore`. |
-| Proveedor en Keycloak | `scripts/configure_keycloak.py` (en `make up`) | Si `GOOGLE_CLIENT_ID` tiene valor, crea o actualiza el proveedor `google` con `hostedDomain = STUDENT_EMAIL_DOMAIN` y `trustEmail` (Google ya verificó el correo), y el *mapper* `username = ${CLAIM.email \| localpart}`. Si está vacío, **quita** el proveedor. También habilita el flujo de navegador del cliente `ct-ranking-app`. |
-| Doble validación | `app/auth/service.py` → `login_with_oidc` | Exige `email_verified` y el dominio institucional, y rechaza cuentas deshabilitadas. |
+| Botones | `app/ui/pages/login.py` | `st.login("google")` en *Iniciar sesión* y `st.login("googlesignup")` en *Crear cuenta*. Si se rechaza el ingreso, muestra el aviso con «Crear cuenta con Google» y «Usar otra cuenta de Google». |
+| Retorno | `app/ui/components/session.py` → `sync_oidc_session()` | Lee `st.user` y llama a `auth.login_with_oidc(..., allow_create=provider == "googlesignup")`. |
+| Reglas | `app/auth/service.py` → `login_with_oidc` | Exige `email_verified` y el dominio institucional. Busca la cuenta por `keycloak_id` o por correo. Sin cuenta y sin `allow_create`, lanza `AccountNotFoundError`. Rechaza las cuentas deshabilitadas. |
+| Configuración de `st.login` | `.streamlit/secrets.toml` (generado) | Lo genera `scripts/write_streamlit_secrets.py` desde `.env`: `redirect_uri`, cookie firmada y los proveedores `google` y `googlesignup` con `kc_idp_hint=google`. Está en `.gitignore`. |
+| Proveedor en Keycloak | `scripts/configure_keycloak.py` (en `make up`) | Crea o actualiza el proveedor `google` (`hostedDomain`, `trustEmail`, *mapper* de username). Si `GOOGLE_CLIENT_ID` está vacío, lo quita. |
 | Cierre de sesión | `session.logout()` | Limpia la sesión de la app y llama a `st.logout()`, que también cierra la sesión en Keycloak. |
 
-Comportamiento:
+## Qué datos se obtienen y cómo se guardan
 
-- **Cuenta ya registrada con el formulario.** Si un estudiante ya tenía cuenta con su correo
-  institucional, la primera vez que entra con Google Keycloak le pide **vincular** las cuentas,
-  confirmando con su contraseña o con un enlace por correo. Desde entonces puede usar ambos
-  métodos.
-- **Cuentas creadas con Google.** No necesitan activación por correo y no tienen contraseña
-  local. Si la quieren, la pueden definir en Keycloak.
+```mermaid
+flowchart LR
+    G["Google<br/>ID token"] -->|"sub, email, email_verified,<br/>given_name, family_name, hd"| K["Keycloak<br/>(BD keycloak)"]
+    K -->|"ID token de Keycloak: sub, email, email_verified,<br/>preferred_username, given_name, family_name"| C["Cookie firmada<br/>de Streamlit (navegador)"]
+    C -->|st.user| A["App<br/>(BD ctranking · tabla users)"]
+```
+
+| Etapa | Datos | Dónde se guardan | Para qué |
+|-------|-------|------------------|----------|
+| **Google → Keycloak** | Identificador de Google (`sub`), correo, «correo verificado», nombre y apellido, y dominio (`hd`). Se piden sólo los permisos `openid email profile`. | **BD `keycloak`**: un usuario con username (parte antes de la @), correo, nombre, apellido y `emailVerified=true`, más el **vínculo federado** (proveedor `google` + identificador de Google + correo). | Que Keycloak reconozca a la persona en los siguientes ingresos. |
+| | Tokens de acceso de Google | **No se guardan** (`storeToken: false`) | La app nunca llama a APIs de Google en nombre del estudiante. |
+| | Cambios posteriores en Google (p. ej. el nombre) | No se sincronizan (`syncMode: IMPORT`: sólo en el primer ingreso) | Se editan en *Mi perfil*. |
+| **Keycloak → navegador** | *Claims* del ID token de Keycloak: `sub` (id del usuario en Keycloak), `email`, `email_verified`, `preferred_username`, `given_name`, `family_name`, más el proveedor usado. | **Cookie de Streamlit** en el navegador: **firmada** con `AUTH_COOKIE_SECRET` (no se puede alterar, pero no está cifrada), `HttpOnly`, `SameSite=Lax`, válida 30 días. Una segunda cookie guarda el ID token para cerrar la sesión en Keycloak. | Mantener la sesión al recargar la página y saber qué botón se usó. |
+| **Navegador → app** | Los mismos *claims* (`st.user`) | **BD `ctranking`, tabla `users`**: `keycloak_id` (= `sub`), `username`, `email`, `first_name`, `last_name`, `email_verified=true`, `last_login` y `role=student`. | Perfil, plan académico, foros, retos, etc. |
+| | Contraseña | **Ninguna**: una cuenta creada con Google no tiene contraseña en Keycloak ni en la app. | El estudiante entra siempre con Google. Si quiere, puede definir una contraseña en Keycloak. |
+| | Foto de perfil de Google | **No se importa** | La foto se sube en *Mi perfil*. |
+
+El procesamiento en la app (`login_with_oidc`) **no guarda nada si se rechaza el ingreso** (otro
+dominio, correo sin verificar, cuenta inexistente o deshabilitada). La transacción se revierte y,
+si Keycloak había creado un usuario, se borra.
+
+**Otros comportamientos:**
+
+- **Cuenta creada con el formulario.** La primera vez que se usa Google con el mismo correo,
+  Keycloak pide **vincular** las cuentas, confirmando con la contraseña o con un enlace por
+  correo. Desde entonces sirven ambos métodos y la app la reconoce como la misma cuenta, buscada
+  por `keycloak_id` o por correo.
 - **2FA.** Con Google, la verificación en dos pasos es la de la propia cuenta de Google. El 2FA
-  de Keycloak sólo aplica al login con contraseña.
+  de Keycloak aplica al login con contraseña.
 
 ## Cómo crear las credenciales (paso a paso)
 
@@ -96,7 +141,8 @@ Comportamiento:
    make run   # write_streamlit_secrets.py genera .streamlit/secrets.toml y arranca Streamlit
    ```
 
-7. Abre http://localhost:8501. Debe aparecer **«Continuar con Google»**.
+7. Abre http://localhost:8501. Deben aparecer **«Iniciar sesión con Google»** (pestaña
+   *Iniciar sesión*) y **«Crear cuenta con Google»** (pestaña *Crear cuenta*).
 
 Para **deshabilitarlo**, deja `GOOGLE_CLIENT_ID` vacío y ejecuta `make up`: el proveedor se
 elimina de Keycloak y el botón desaparece.
@@ -115,13 +161,16 @@ elimina de Keycloak y el botón desaparece.
 Se usó un **Google simulado**:
 
 - **Montaje:** un realm aparte de Keycloak (`mock-google`) actuando como proveedor OpenID
-  Connect, registrado con el alias `google`. Tenía una cuenta institucional y otra `@gmail.com`.
-- **Recorrido:** con Selenium y Firefox se probó el recorrido completo:
-  1. El botón lleva directo al proveedor.
-  2. El usuario se crea y vincula (`eva.institucional`).
-  3. La sesión persiste al recargar.
-  4. El cierre de sesión funciona.
-  5. La cuenta `@gmail.com` se rechaza con un mensaje claro.
-- **Limpieza:** al terminar se eliminaron el realm, el proveedor y los usuarios de prueba.
+  Connect, registrado temporalmente con el alias `google`. Tenía una cuenta institucional y otra
+  `@gmail.com`.
+- **Recorrido**, con Selenium y Firefox:
+  1. Aparecen los dos botones, cada uno en su pestaña.
+  2. «Iniciar sesión con Google» sin cuenta se rechaza con el aviso, y el usuario creado por
+     Keycloak se borra.
+  3. «Crear cuenta con Google» crea la cuenta y entra.
+  4. «Iniciar sesión con Google» con la cuenta ya creada entra.
+  5. «Crear cuenta con Google» con una cuenta `@gmail.com` se rechaza.
+- **Limpieza:** al terminar se restauró el proveedor real de Google y se borraron el realm y los
+  usuarios de prueba.
 - **Con Google real:** el rechazo de otros dominios ocurre antes, en Keycloak, gracias a
   `hostedDomain`.
