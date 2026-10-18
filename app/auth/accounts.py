@@ -21,9 +21,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
-from app.db.models import User, VerificationCode
-from app.services import auth, mailer
+from app import auth
+from app.core import mailer
+from app.core.config import get_settings
+from app.database.models import User, VerificationCode
 
 DELETE_PURPOSE = "delete_account"
 CODE_TTL = timedelta(minutes=15)

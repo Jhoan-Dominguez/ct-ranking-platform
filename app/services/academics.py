@@ -21,9 +21,9 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.config import get_settings
-from app.data.pensums import PENSUMS
-from app.db.models import GradeItem, Subject, SubjectCategory, SubjectStatus, User
+from app.core.config import get_settings
+from app.database.models import GradeItem, Subject, SubjectCategory, SubjectStatus, User
+from app.database.seeds.pensums import PENSUMS
 
 SEEN_STATUSES = {SubjectStatus.IN_PROGRESS, SubjectStatus.PASSED, SubjectStatus.FAILED}
 

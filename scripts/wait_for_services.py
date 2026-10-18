@@ -12,7 +12,7 @@ from sqlalchemy.exc import OperationalError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 TIMEOUT_S = 180
 

@@ -16,7 +16,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 TIMEOUT = 10
 

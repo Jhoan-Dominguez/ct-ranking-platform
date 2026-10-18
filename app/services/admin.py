@@ -9,8 +9,8 @@ import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.config import get_settings
-from app.db.models import (
+from app.core.config import get_settings
+from app.database.models import (
     Challenge,
     ChallengeKind,
     ChallengeParticipant,

@@ -9,7 +9,7 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import User
+from app.database.models import User
 
 AVATAR_SIZE = 256
 MAX_AVATAR_BYTES = 5 * 1024 * 1024

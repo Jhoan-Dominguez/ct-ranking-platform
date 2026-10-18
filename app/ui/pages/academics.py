@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
-from app.config import get_settings
-from app.data.pensums import PENSUMS
-from app.db.models import Subject, SubjectCategory, SubjectStatus
-from app.db.session import session_scope
+from app.core.config import get_settings
+from app.database.models import Subject, SubjectCategory, SubjectStatus
+from app.database.seeds.pensums import PENSUMS
+from app.database.session import session_scope
 from app.services import academics, users
-from app.ui import common
-from app.ui.common import CATEGORY_LABELS
+from app.ui.components import actions, formatting, session
+from app.ui.components.charts import averages_chart, credits_chart
+from app.ui.components.formatting import CATEGORY_LABELS
 
 STATUS_LABELS = {
     SubjectStatus.PLANNED: "📝 Pendiente",
@@ -20,14 +20,6 @@ STATUS_LABELS = {
     SubjectStatus.PASSED: "✅ Aprobada",
     SubjectStatus.FAILED: "❌ Reprobada",
 }
-# Colores de la gráfica de avance de créditos.
-PASSED_COLOR = "#7CC6F2"  # azul claro: créditos aprobados
-IN_PROGRESS_COLOR = "#9CA3AF"  # gris: créditos que se están cursando
-REMAINING_COLOR = "rgba(156, 163, 175, 0.15)"
-AVERAGE_COLOR = "#4F46E5"  # promedio por semestre (color primario de la app)
-PASSING_COLOR = "#DC2626"  # rojo: nota mínima aprobatoria
-GENERAL_AVERAGE_COLOR = "#16A34A"  # verde: promedio general
-CHART_HEIGHT = 320  # altura común para que las gráficas lado a lado queden alineadas
 
 
 def _plan_header(user) -> None:
@@ -40,7 +32,7 @@ def _plan_header(user) -> None:
             current = c3.number_input("Semestre actual", 1, 20, user.current_semester)
             total = c4.number_input("Total de semestres del plan", 1, 20, user.total_semesters)
             if st.form_submit_button("Guardar plan", type="primary"):
-                common.run_action(
+                actions.run_action(
                     lambda s: users.update_profile(
                         s,
                         s.merge(user),
@@ -61,7 +53,7 @@ def _plan_header(user) -> None:
         program_name = c5.selectbox("Programa", list(PENSUMS), key="pensum_program")
         if c6.button("Cargar pensum", icon="📥", width="stretch"):
             pensum = PENSUMS[program_name]
-            common.run_action(
+            actions.run_action(
                 lambda s: academics.load_pensum(s, s.merge(user), program_name),
                 f"Pensum de {pensum.program} cargado ({len(pensum.subjects)} materias, "
                 f"{pensum.total_credits} créditos)",
@@ -85,7 +77,7 @@ def _add_subject_dialog(user) -> None:
             "Categoría", list(SubjectCategory), format_func=lambda c: CATEGORY_LABELS[c], index=2
         )
         if st.form_submit_button("Agregar", type="primary"):
-            common.run_action(
+            actions.run_action(
                 lambda s: academics.add_subject(
                     s,
                     user.id,
@@ -126,7 +118,7 @@ def _edit_subject_dialog(user_id: int, subject: Subject) -> None:
             format_func=lambda c: CATEGORY_LABELS[c],
         )
         if st.form_submit_button("Guardar", type="primary"):
-            common.run_action(
+            actions.run_action(
                 lambda s: academics.update_subject(
                     s,
                     user_id,
@@ -168,7 +160,7 @@ def _item_form(user_id: int, subject_id: int, key: str, item=None) -> None:
         delivered = st.date_input("Fecha de entrega", item.delivered_on if item else None)
         if st.form_submit_button("Guardar ítem" if item else "Agregar ítem", type="primary"):
             if item is None:
-                common.run_action(
+                actions.run_action(
                     lambda s: academics.add_item(
                         s,
                         user_id,
@@ -182,7 +174,7 @@ def _item_form(user_id: int, subject_id: int, key: str, item=None) -> None:
                     "Ítem agregado",
                 )
             else:
-                common.run_action(
+                actions.run_action(
                     lambda s: academics.update_item(
                         s,
                         user_id,
@@ -268,16 +260,16 @@ def _subject_card(user, subject: Subject) -> None:
     title = (
         f"{STATUS_LABELS[SubjectStatus(subject.status)]} · **{subject.name}** "
         f"{f'({subject.code})' if subject.code else ''} · {subject.credits} cr · "
-        f":{color}[nota {common.fmt_grade(grade)}]"
+        f":{color}[nota {formatting.fmt_grade(grade)}]"
     )
     with _stateful_expander(title, _subject_key(subject)):
-        meta, actions = st.columns([3, 2])
+        meta, toolbar = st.columns([3, 2])
         meta.caption(
             f"{CATEGORY_LABELS[SubjectCategory(subject.category)]} · "
             f"Docente: {subject.teacher or '—'} · Semestre {subject.semester} · "
             f"Porcentaje evaluado: {progress:.0f}%"
         )
-        b1, b2, b3 = actions.columns(3)
+        b1, b2, b3 = toolbar.columns(3)
         if b1.button("Editar", key=f"edit_s_{subject.id}", icon="✏️"):
             _edit_subject_dialog(user.id, subject)
         suggested = academics.suggested_status(grade)
@@ -291,12 +283,12 @@ def _subject_card(user, subject: Subject) -> None:
                 help=f"Marcar como {suggested.value} según la nota actual",
             )
         ):
-            common.run_action(
+            actions.run_action(
                 lambda s: academics.update_subject(s, user.id, subject.id, status=suggested),
                 f"Materia marcada como {suggested.value}",
             )
         if b3.button("Borrar", key=f"del_s_{subject.id}", icon="🗑️"):
-            common.run_action(
+            actions.run_action(
                 lambda s: academics.delete_subject(s, user.id, subject.id), "Materia eliminada"
             )
 
@@ -311,7 +303,7 @@ def _subject_card(user, subject: Subject) -> None:
                 if c4.button("✏️", key=f"edit_i_{item.id}", help="Editar"):
                     _edit_item_dialog(user.id, item)
                 if c5.button("🗑️", key=f"del_i_{item.id}", help="Eliminar"):
-                    common.run_action(
+                    actions.run_action(
                         lambda s, iid=item.id: academics.delete_item(s, user.id, iid),
                         "Ítem eliminado",
                     )
@@ -319,120 +311,6 @@ def _subject_card(user, subject: Subject) -> None:
             st.caption("Sin ítems calificados todavía.")
         st.markdown("**Agregar ítem calificable**")
         _item_form(user.id, subject.id, f"add_item_{subject.id}")
-
-
-def _averages_chart(summary: academics.AcademicSummary) -> None:
-    data = pd.DataFrame(
-        [
-            {"Semestre": f"S{x.semester}", "Promedio": x.average}
-            for x in summary.semesters
-            if x.average is not None
-        ]
-    )
-    st.markdown("**Evolución del promedio por semestre**")
-    if data.empty:
-        st.caption("Aún no hay notas registradas.")
-        return
-    settings = get_settings()
-    semesters = data["Semestre"].tolist()
-    fig = go.Figure()
-    fig.add_scatter(
-        name="Promedio del semestre",
-        x=semesters,
-        y=data["Promedio"],
-        mode="lines+markers",
-        line={"color": AVERAGE_COLOR, "width": 3},
-        hovertemplate="%{x}: %{y:.2f}<extra></extra>",
-    )
-    # Las líneas de referencia se dibujan como series para que aparezcan en la leyenda.
-    fig.add_scatter(
-        name=f"Nota mínima aprobatoria ({settings.grade_passing:g})",
-        x=semesters,
-        y=[settings.grade_passing] * len(semesters),
-        mode="lines",
-        line={"color": PASSING_COLOR, "dash": "dot"},
-        hoverinfo="skip",
-    )
-    if summary.general_average is not None:
-        fig.add_scatter(
-            name=f"Promedio general ({summary.general_average:.2f})",
-            x=semesters,
-            y=[summary.general_average] * len(semesters),
-            mode="lines",
-            line={"color": GENERAL_AVERAGE_COLOR, "dash": "dash"},
-            hoverinfo="skip",
-        )
-    fig.update_layout(
-        height=CHART_HEIGHT,
-        margin={"l": 10, "r": 10, "t": 10, "b": 10},
-        yaxis={"range": [0, settings.grade_max], "title": "Promedio"},
-        xaxis={"title": None},
-        legend={"orientation": "h", "y": -0.25},
-        showlegend=True,
-    )
-    st.plotly_chart(fig, width="stretch")
-
-
-def credits_chart(subjects: list[Subject]) -> None:
-    """Barras apiladas (en % del plan) de créditos aprobados y en curso por categoría."""
-    progress = academics.credit_progress(subjects)
-    total = progress[-1]
-    if total.total == 0:
-        return
-    rows = [p for p in progress if p.total > 0]
-    labels = [
-        "📊 Total" if p.category == "total" else CATEGORY_LABELS[SubjectCategory(p.category)]
-        for p in rows
-    ]
-    remaining = [max(0.0, 100 - p.passed_pct - p.in_progress_pct) for p in rows]
-
-    fig = go.Figure()
-    fig.add_bar(
-        name="Aprobados",
-        y=labels,
-        x=[p.passed_pct for p in rows],
-        orientation="h",
-        marker_color=PASSED_COLOR,
-        text=[f"{p.passed} cr" if p.passed else "" for p in rows],
-        customdata=[[p.passed, p.total] for p in rows],
-        hovertemplate="%{y}<br>Aprobados: %{customdata[0]} de %{customdata[1]} créditos"
-        " (%{x:.0f}%)<extra></extra>",
-    )
-    fig.add_bar(
-        name="Cursando",
-        y=labels,
-        x=[p.in_progress_pct for p in rows],
-        orientation="h",
-        marker_color=IN_PROGRESS_COLOR,
-        text=[f"{p.in_progress} cr" if p.in_progress else "" for p in rows],
-        customdata=[[p.in_progress, p.total] for p in rows],
-        hovertemplate="%{y}<br>Cursando: %{customdata[0]} de %{customdata[1]} créditos"
-        " (%{x:.0f}%)<extra></extra>",
-    )
-    fig.add_bar(
-        name="Por cursar",
-        y=labels,
-        x=remaining,
-        orientation="h",
-        marker_color=REMAINING_COLOR,
-        text=[f"{p.passed_pct + p.in_progress_pct:.0f}% de {p.total} cr" for p in rows],
-        textposition="inside",
-        insidetextanchor="end",
-        hoverinfo="skip",
-    )
-    fig.update_layout(
-        barmode="stack",
-        height=max(CHART_HEIGHT, 70 + 48 * len(rows)),
-        margin={"l": 10, "r": 10, "t": 10, "b": 10},
-        xaxis={"range": [0, 100], "ticksuffix": "%", "title": None},
-        yaxis={"autorange": "reversed"},
-        legend={"orientation": "h", "y": -0.25, "traceorder": "normal"},
-    )
-    st.markdown(
-        f"**Avance de créditos** · {total.passed} aprobados + {total.in_progress} cursando "
-        f"de {total.total} ({total.passed_pct + total.in_progress_pct:.0f}%)"
-    )
-    st.plotly_chart(fig, width="stretch")
 
 
 def _semester_table(subjects: list[Subject]) -> None:
@@ -459,7 +337,7 @@ def _semester_table(subjects: list[Subject]) -> None:
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     head, button = st.columns([4, 1], vertical_alignment="bottom")
     head.title("📚 Plan académico")
     if button.button("Agregar materia", icon="➕", type="primary", width="stretch"):
@@ -472,10 +350,10 @@ def render() -> None:
         summary = academics.summarize(subjects, user.current_semester)
 
         cols = st.columns(5)
-        cols[0].metric("Promedio general", common.fmt_grade(summary.general_average))
+        cols[0].metric("Promedio general", formatting.fmt_grade(summary.general_average))
         cols[1].metric(
             f"Promedio semestre {user.current_semester}",
-            common.fmt_grade(summary.current_semester_average),
+            formatting.fmt_grade(summary.current_semester_average),
         )
         cols[2].metric("Créditos aprobados", summary.passed_credits)
         cols[3].metric("Aprobadas / reprobadas", f"{summary.passed} / {summary.failed}")
@@ -502,7 +380,7 @@ def render() -> None:
             with left:
                 credits_chart(subjects)
             with right:
-                _averages_chart(summary)
+                averages_chart(summary)
             past = [sem for sem in summary.semesters if sem.semester < user.current_semester]
             if not past:
                 st.info("Aún no registras semestres anteriores.")
@@ -512,7 +390,7 @@ def render() -> None:
             )
             for sem in past:
                 st.markdown(
-                    f"#### Semestre {sem.semester} · promedio {common.fmt_grade(sem.average)} "
+                    f"#### Semestre {sem.semester} · promedio {formatting.fmt_grade(sem.average)} "
                     f"· {sem.credits} créditos"
                 )
                 for subject in subjects:
@@ -530,7 +408,7 @@ def render() -> None:
                 sem_subjects = [x for x in subjects if x.semester == sem.semester]
                 passed = sum(1 for x in sem_subjects if x.status == SubjectStatus.PASSED)
                 marker = " · 📍 actual" if sem.semester == user.current_semester else ""
-                average = f" · promedio {common.fmt_grade(sem.average)}" if sem.average else ""
+                average = f" · promedio {formatting.fmt_grade(sem.average)}" if sem.average else ""
                 with _stateful_expander(
                     f"📘 **Semestre {sem.semester}**{marker} · {sem.subjects} materias · "
                     f"{sem.credits} créditos · {passed}/{sem.subjects} aprobadas{average}",

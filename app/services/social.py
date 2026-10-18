@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Follow, SupportMessage, User
+from app.database.models import Follow, SupportMessage, User
 from app.services import moderation
 
 SUPPORT_TEMPLATES = [

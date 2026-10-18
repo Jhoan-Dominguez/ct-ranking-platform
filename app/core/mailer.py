@@ -14,7 +14,7 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from html import escape
 
-from app.config import get_settings
+from app.core.config import get_settings
 
 
 class MailError(RuntimeError):

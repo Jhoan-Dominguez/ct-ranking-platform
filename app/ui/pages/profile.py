@@ -7,10 +7,12 @@ from datetime import date
 import requests
 import streamlit as st
 
-from app.config import get_settings
-from app.db.session import session_scope
-from app.services import accounts, auth, social, users
-from app.ui import common
+from app import auth
+from app.auth import accounts
+from app.core.config import get_settings
+from app.database.session import session_scope
+from app.services import social, users
+from app.ui.components import actions, formatting, session, widgets
 
 CODE_SENT = "_deletion_code_sent"
 
@@ -27,14 +29,14 @@ def _security_tab(user, two_factor: bool) -> None:
         if user.is_admin:
             email_value = st.text_input("Correo electrónico", user.email)
         else:
-            email_value = common.institutional_email_input("Correo institucional", user.email)
+            email_value = widgets.institutional_email_input("Correo institucional", user.email)
         if st.form_submit_button("Actualizar correo"):
 
             def _change(s):
                 email = email_value if user.is_admin else auth.student_email(email_value)
                 auth.change_email(s, s.merge(user), email)
 
-            common.run_action(_change, "Correo actualizado")
+            actions.run_action(_change, "Correo actualizado")
     with st.form("password", clear_on_submit=True):
         st.markdown("**Cambiar contraseña**")
         current_pwd = st.text_input("Contraseña actual", type="password")
@@ -45,7 +47,7 @@ def _security_tab(user, two_factor: bool) -> None:
             if new_pwd != new_pwd2:
                 st.error("Las contraseñas no coinciden.")
             else:
-                common.run_action(
+                actions.run_action(
                     lambda s: auth.change_password(
                         s, s.merge(user), current_pwd, new_pwd, otp or None
                     ),
@@ -62,7 +64,7 @@ def _security_tab(user, two_factor: bool) -> None:
             password = st.text_input("Contraseña", type="password")
             code = st.text_input("Código actual de tu app autenticadora", max_chars=6)
             if st.form_submit_button("Desactivar 2FA"):
-                common.run_action(
+                actions.run_action(
                     lambda _s: auth.disable_two_factor(user, password, code),
                     "Verificación en dos pasos desactivada",
                 )
@@ -78,7 +80,7 @@ def _security_tab(user, two_factor: bool) -> None:
         "4. Desde entonces, al iniciar sesión escribe también el código de la app."
     )
     if st.button("Enviar enlace de configuración", icon="📧", type="primary"):
-        common.run_action(
+        actions.run_action(
             lambda _s: auth.request_two_factor_setup(user),
             f"Te enviamos el enlace a {user.email} (válido por {auth.TOTP_SETUP_LINK_HOURS} horas)",
         )
@@ -104,7 +106,7 @@ def _delete_tab(user, two_factor: bool) -> None:
                     accounts.request_deletion(s, s.merge(user), password, otp or None)
                     st.session_state[CODE_SENT] = True
 
-                common.run_action(_request, f"Te enviamos un código a {user.email}")
+                actions.run_action(_request, f"Te enviamos un código a {user.email}")
         return
 
     st.markdown(f"**Paso 2 de 2:** escribe el código que enviamos a **{user.email}**.")
@@ -117,13 +119,13 @@ def _delete_tab(user, two_factor: bool) -> None:
             if not confirm:
                 st.error("Marca la casilla de confirmación.")
             else:
-                when = common.run_action(
+                when = actions.run_action(
                     lambda s: accounts.confirm_deletion(s, s.merge(user), code), rerun=False
                 )
                 if when is not None:
-                    common.logout()
-                    common.flash(
-                        f"Tu cuenta se eliminará el {common.fmt_dt(when)}. Inicia sesión antes "
+                    session.logout()
+                    actions.flash(
+                        f"Tu cuenta se eliminará el {formatting.fmt_dt(when)}. Inicia sesión antes "
                         "de esa fecha si quieres cancelarlo.",
                         "⚠️",
                     )
@@ -134,7 +136,7 @@ def _delete_tab(user, two_factor: bool) -> None:
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     st.title("👤 Mi perfil")
     try:
         two_factor = auth.two_factor_enabled(user)
@@ -144,14 +146,14 @@ def render() -> None:
 
     left, right = st.columns([1, 3])
     with left:
-        st.markdown(common.avatar_html(user, 160), unsafe_allow_html=True)
+        st.markdown(widgets.avatar_html(user, 160), unsafe_allow_html=True)
         upload = st.file_uploader("Cambiar foto", type=["png", "jpg", "jpeg", "webp"])
         if upload is not None and st.button("Guardar foto", type="primary"):
             raw = upload.getvalue()
-            common.run_action(lambda s: users.set_avatar(s.merge(user), raw), "Foto actualizada")
+            actions.run_action(lambda s: users.set_avatar(s.merge(user), raw), "Foto actualizada")
         if user.avatar and st.button("Quitar foto"):
-            common.run_action(lambda s: users.set_avatar(s.merge(user), None), "Foto eliminada")
-        st.caption(f"Miembro desde {common.fmt_dt(user.created_at, with_time=False)}")
+            actions.run_action(lambda s: users.set_avatar(s.merge(user), None), "Foto eliminada")
+        st.caption(f"Miembro desde {formatting.fmt_dt(user.created_at, with_time=False)}")
         st.caption(f"Rol: {'administrador' if user.is_admin else 'estudiante'}")
 
     with right:
@@ -196,7 +198,7 @@ def render() -> None:
                         linkedin_url=linkedin,
                     )
 
-                common.run_action(_save, "Perfil actualizado")
+                actions.run_action(_save, "Perfil actualizado")
 
         with tab_academic, st.form("academic"):
             c1, c2 = st.columns(2)
@@ -209,7 +211,7 @@ def render() -> None:
             current = c5.number_input("Semestre actual", 1, 20, user.current_semester)
             total = c6.number_input("Total de semestres", 1, 20, user.total_semesters)
             if st.form_submit_button("Guardar", type="primary"):
-                common.run_action(
+                actions.run_action(
                     lambda s: users.update_profile(
                         s,
                         s.merge(user),

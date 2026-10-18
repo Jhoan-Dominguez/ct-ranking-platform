@@ -17,10 +17,10 @@ from sqlalchemy import func, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import get_settings
-from app.db.models import Role, User
-from app.db.session import session_scope
-from app.services import auth
+from app import auth
+from app.core.config import get_settings
+from app.database.models import Role, User
+from app.database.session import session_scope
 
 
 def main() -> None:

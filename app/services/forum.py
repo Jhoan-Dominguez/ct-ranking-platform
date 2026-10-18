@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Comment, Post, PostLike, User
+from app.database.models import Comment, Post, PostLike, User
 
 CATEGORIES = [
     "General",

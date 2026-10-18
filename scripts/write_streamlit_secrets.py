@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import ROOT_DIR, get_settings
+from app.core.config import ROOT_DIR, get_settings
 
 SECRETS_FILE = ROOT_DIR / ".streamlit" / "secrets.toml"
 

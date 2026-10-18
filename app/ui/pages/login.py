@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.config import get_settings
-from app.db.session import session_scope
-from app.services import auth
-from app.ui import common
+from app import auth
+from app.core.config import get_settings
+from app.database.session import session_scope
+from app.ui.components import actions, session, widgets
 
 UNVERIFIED_LOGIN = "_unverified_login"
 REGISTERED_EMAIL = "_registered_email"
@@ -51,7 +51,7 @@ def _login_tab() -> None:
                 st.session_state.pop(REGISTERED_EMAIL, None)
                 st.session_state["user_id"] = user_id
                 if not pending:  # una cuenta en eliminación sólo ve la pantalla de cancelación
-                    common.flash(f"¡Bienvenido, {name}!", "👋")
+                    actions.flash(f"¡Bienvenido, {name}!", "👋")
                 st.rerun()
 
     if auth.google_login_enabled():
@@ -76,10 +76,10 @@ def _google_button() -> None:
         "<div style='text-align:center;opacity:.6;margin:.3rem 0'>— o —</div>",
         unsafe_allow_html=True,
     )
-    if error := st.session_state.get(common.OIDC_ERROR):
+    if error := st.session_state.get(session.OIDC_ERROR):
         st.error(error)
         if st.button("Usar otra cuenta de Google", width="stretch"):
-            common.logout()
+            session.logout()
         return
     if st.button("Continuar con Google", icon=":material/account_circle:", width="stretch"):
         st.login("google")
@@ -92,7 +92,7 @@ def _register_tab() -> None:
         first_name = c1.text_input("Nombre")
         last_name = c2.text_input("Apellido")
         new_username = st.text_input("Usuario", help="3 a 30 caracteres: letras, números, . - _")
-        email_local = common.institutional_email_input("Correo institucional")
+        email_local = widgets.institutional_email_input("Correo institucional")
         c3, c4 = st.columns(2)
         pwd = c3.text_input("Contraseña", type="password", help="Mín. 8 con letras y números")
         pwd2 = c4.text_input("Repite la contraseña", type="password")
@@ -116,7 +116,7 @@ def _register_tab() -> None:
                 st.error(str(exc))
                 return
             if verified:
-                common.flash("Cuenta creada. Ya puedes iniciar sesión.", "🎉")
+                actions.flash("Cuenta creada. Ya puedes iniciar sesión.", "🎉")
             else:
                 st.session_state[REGISTERED_EMAIL] = address
             st.rerun()
@@ -128,7 +128,7 @@ def render() -> None:
     with center:
         st.title("🎓 CT Ranking")
         st.caption("Foros, plan académico, retos y una comunidad que te impulsa.")
-        common.show_flashes()
+        actions.show_flashes()
         if address := st.session_state.get(REGISTERED_EMAIL):
             st.success(
                 f"¡Cuenta creada! Te enviamos un enlace de activación a **{address}**. "

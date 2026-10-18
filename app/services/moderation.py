@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import (
+from app.database.models import (
     Comment,
     Follow,
     Post,
@@ -101,7 +101,7 @@ def blocked_users(session: Session, user_id: int) -> list[User]:
 
 def hidden_user_ids(session: Session, viewer_id: int) -> set[int]:
     """Usuarios cuyo contenido no debe ver ``viewer_id``: bloqueos y cuentas en eliminación."""
-    from app.services.accounts import pending_deletion_ids
+    from app.auth.accounts import pending_deletion_ids
 
     return (blocked_ids(session, viewer_id) | pending_deletion_ids(session)) - {viewer_id}
 

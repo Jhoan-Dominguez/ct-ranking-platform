@@ -6,10 +6,10 @@ from datetime import date
 
 import streamlit as st
 
-from app.db.models import ChallengeKind, Difficulty, Visibility
-from app.db.session import session_scope
+from app.database.models import ChallengeKind, Difficulty, Visibility
+from app.database.session import session_scope
 from app.services import challenge_rules, challenges, moderation, social
-from app.ui import common
+from app.ui.components import actions, formatting, rankings, session
 
 DIFFICULTY_LABELS = {
     Difficulty.EASY: "🟢 Fácil",
@@ -65,7 +65,7 @@ def _create_dialog(user) -> None:
                 )
                 st.session_state["challenge_id"] = ch.id
 
-            common.run_action(_create, "Reto creado")
+            actions.run_action(_create, "Reto creado")
 
 
 def _challenge_card(s, user, row: challenges.ChallengeRow) -> None:
@@ -89,9 +89,9 @@ def _challenge_card(s, user, row: challenges.ChallengeRow) -> None:
         st.write(ch.description)
         dates = []
         if ch.starts_at:
-            dates.append(f"desde {common.fmt_dt(ch.starts_at)}")
+            dates.append(f"desde {formatting.fmt_dt(ch.starts_at)}")
         if ch.ends_at:
-            dates.append(f"hasta {common.fmt_dt(ch.ends_at)}")
+            dates.append(f"hasta {formatting.fmt_dt(ch.ends_at)}")
         creator = ch.creator.display_name if ch.creator else "—"
         st.caption(
             f"Creado por {creator} · 👥 {row.participants} participantes · "
@@ -102,7 +102,7 @@ def _challenge_card(s, user, row: challenges.ChallengeRow) -> None:
             current, target = challenge_rules.progress(s, ch.rule, user.id)
             st.progress(min(1.0, current / target), text=f"Progreso: {current:g} / {target:g}")
         if row.done:
-            st.success(f"Completado el {common.fmt_dt(row.my_participation.completed_at)}")
+            st.success(f"Completado el {formatting.fmt_dt(row.my_participation.completed_at)}")
 
         b = st.columns(4)
         if b[0].button("Ver ranking", key=f"rank_{ch.id}", icon="🏆", width="stretch"):
@@ -111,42 +111,42 @@ def _challenge_card(s, user, row: challenges.ChallengeRow) -> None:
         if is_open and not row.joined:
             if b[1].button("Unirme", key=f"join_{ch.id}", type="primary", width="stretch"):
                 st.session_state["challenge_id"] = ch.id
-                common.run_action(
+                actions.run_action(
                     lambda s2: challenges.join(s2, user, ch.id), "¡Te uniste al reto!"
                 )
         elif is_open and not row.done:
             if ch.rule:
                 if b[1].button("Verificar", key=f"check_{ch.id}", type="primary", width="stretch"):
-                    common.run_action(
+                    actions.run_action(
                         lambda s2: challenges.complete(s2, user, ch.id), "¡Reto completado! 🎉"
                     )
             else:
                 with b[1].popover("Cumplido", icon="🏁", width="stretch"):
                     evidence = st.text_area("Evidencia (enlace o descripción)", key=f"ev_{ch.id}")
                     if st.button("Enviar", key=f"done_{ch.id}", type="primary"):
-                        common.run_action(
+                        actions.run_action(
                             lambda s2: challenges.complete(s2, user, ch.id, evidence),
                             "¡Reto completado! 🎉",
                         )
             if b[2].button("Abandonar", key=f"leave_{ch.id}", width="stretch"):
-                common.run_action(lambda s2: challenges.leave(s2, user, ch.id), "Saliste del reto")
+                actions.run_action(lambda s2: challenges.leave(s2, user, ch.id), "Saliste del reto")
         if user.is_admin or ch.creator_id == user.id:
             with b[3].popover("Gestionar", icon="⚙️", width="stretch"):
                 label = "Cerrar reto" if ch.is_active else "Reabrir reto"
                 if st.button(label, key=f"toggle_{ch.id}"):
-                    common.run_action(
+                    actions.run_action(
                         lambda s2: challenges.set_active(s2, user, ch.id, not ch.is_active),
                         "Reto actualizado",
                     )
                 if st.button("Eliminar reto", key=f"delete_{ch.id}", icon="🗑️"):
                     st.session_state.pop("challenge_id", None)
-                    common.run_action(
+                    actions.run_action(
                         lambda s2: challenges.delete_challenge(s2, user, ch.id), "Reto eliminado"
                     )
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     head, button = st.columns([4, 1], vertical_alignment="bottom")
     head.title("🏆 Retos dinámicos")
     if button.button("Crear reto", icon="➕", type="primary", width="stretch"):
@@ -189,7 +189,7 @@ def render() -> None:
             if selected not in visible_ids:
                 selected = rows[0].challenge.id if rows else None
             if selected:
-                common.challenge_ranking_banner(s, selected)
+                rankings.challenge_ranking_banner(s, selected)
             ranking_scope = st.radio(
                 "Ranking",
                 ["Todos", "Personas que sigo"],
@@ -197,7 +197,7 @@ def render() -> None:
                 label_visibility="collapsed",
             )
             if ranking_scope == "Todos":
-                common.leaderboard_banner(s)
+                rankings.leaderboard_banner(s)
             else:
                 ids = social.following_ids(s, user.id) | {user.id}
-                common.leaderboard_banner(s, "Ranking entre amigos", user_ids=ids)
+                rankings.leaderboard_banner(s, "Ranking entre amigos", user_ids=ids)

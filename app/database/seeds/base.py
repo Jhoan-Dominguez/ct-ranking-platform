@@ -1,18 +1,13 @@
-"""Crea las tablas y carga los datos base (retos globales y administrador local).
-
-Uso: ``python -m app.db.init_db [--demo] [--reset]``
-"""
+"""Datos base de la plataforma: usuario administrador y retos globales. Idempotente."""
 
 from __future__ import annotations
 
-import argparse
+from sqlalchemy import select
 
-from sqlalchemy import select, text
-
-from app.config import get_settings
-from app.db.models import Base, Challenge, ChallengeKind, Difficulty, Role, User
-from app.db.session import get_engine, session_scope
-from app.services import auth
+from app import auth
+from app.core.config import get_settings
+from app.database.models import Challenge, ChallengeKind, Difficulty, Role, User
+from app.database.session import session_scope
 
 GLOBAL_CHALLENGES = [
     ("Rompe el hielo", "Publica tu primera discusión en el foro.", "first_post", "facil", 10),
@@ -52,26 +47,6 @@ GLOBAL_CHALLENGES = [
 ]
 
 
-# Columnas agregadas a tablas que ya existían. create_all() sólo crea tablas nuevas, así que
-# estas sentencias idempotentes (PostgreSQL) actualizan una BD existente sin perder datos.
-COLUMN_UPGRADES = [
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_scheduled_for TIMESTAMPTZ",
-]
-
-
-def create_schema(reset: bool = False) -> None:
-    engine = get_engine()
-    if reset:
-        Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as conn:
-            for statement in COLUMN_UPGRADES:
-                conn.execute(text(statement))
-
-
 def seed_base() -> None:
     settings = get_settings()
     with session_scope() as session:
@@ -108,22 +83,3 @@ def seed_base() -> None:
                     creator_id=admin.id,
                 )
             )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reset", action="store_true", help="Elimina y recrea todas las tablas")
-    parser.add_argument("--demo", action="store_true", help="Carga usuarios y datos de ejemplo")
-    args = parser.parse_args()
-
-    create_schema(reset=args.reset)
-    seed_base()
-    print("Esquema y datos base listos.")
-    if args.demo:
-        from app.db.demo_data import load_demo
-
-        load_demo()
-
-
-if __name__ == "__main__":
-    main()

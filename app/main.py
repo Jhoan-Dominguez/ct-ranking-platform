@@ -11,12 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 from sqlalchemy.exc import OperationalError
 
-from app.db.session import session_scope
+from app.database.session import session_scope
 from app.jobs.purge_accounts import start_background_purge
-from app.services import accounts, social
-from app.ui import common
-from app.views import (
+from app.services import social
+from app.ui.components import actions, session, sidebar, widgets
+from app.ui.pages import (
     academics,
+    account_pending,
     admin,
     challenges,
     community,
@@ -30,35 +31,11 @@ from app.views import (
 st.set_page_config(page_title="CT Ranking", page_icon="🎓", layout="wide")
 
 
-def pending_deletion_page(user) -> None:
-    """Única pantalla disponible para una cuenta con eliminación programada."""
-    _, center, _ = st.columns([1, 1.6, 1])
-    with center:
-        st.title("Tu cuenta será eliminada")
-        when = common.fmt_dt(user.deletion_scheduled_for)
-        st.warning(
-            f"Solicitaste eliminar tu cuenta. Está **desactivada** y se borrará definitivamente "
-            f"el **{when}**, junto con tu perfil, plan académico, publicaciones y demás datos.",
-            icon="⚠️",
-        )
-        st.write("Mientras tanto nadie puede ver tu perfil ni tu contenido.")
-        c1, c2 = st.columns(2)
-        if c1.button("Cancelar eliminación", type="primary", icon="↩️", width="stretch"):
-
-            def _cancel(s):
-                accounts.cancel_deletion(s, s.merge(user))
-
-            common.run_action(_cancel, "¡Tu cuenta vuelve a estar activa!")
-        if c2.button("Cerrar sesión", icon="🚪", width="stretch"):
-            common.logout()
-            st.rerun()
-
-
 def main() -> None:
     start_background_purge()
     try:
-        common.sync_oidc_session()
-        user = common.current_user()
+        session.sync_oidc_session()
+        user = session.current_user()
     except OperationalError:
         st.error(
             "No hay conexión con la base de datos. Levanta los servicios con `make up` "
@@ -70,9 +47,9 @@ def main() -> None:
         st.navigation([st.Page(login.render, title="Ingresar", icon="🔐")], position="hidden").run()
         return
     if user.pending_deletion:
-        common.show_flashes()
+        actions.show_flashes()
         st.navigation(
-            [st.Page(lambda: pending_deletion_page(user), title="Cuenta", icon="⚠️")],
+            [st.Page(lambda: account_pending.render(user), title="Cuenta", icon="⚠️")],
             position="hidden",
         ).run()
         return
@@ -105,7 +82,7 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown(
-            f'<div style="text-align:center">{common.avatar_html(user, 72)}</div>',
+            f'<div style="text-align:center">{widgets.avatar_html(user, 72)}</div>',
             unsafe_allow_html=True,
         )
         st.markdown(f"<center><b>{user.display_name}</b></center>", unsafe_allow_html=True)
@@ -114,11 +91,11 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         if st.button("Cerrar sesión", icon="🚪", width="stretch"):
-            common.logout()
+            session.logout()
             st.rerun()
-        common.enable_sidebar_hover()
+        sidebar.enable_sidebar_hover()
 
-    common.show_flashes()
+    actions.show_flashes()
     st.navigation(pages).run()
 
 

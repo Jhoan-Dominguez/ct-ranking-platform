@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.db.models import ReportReason
+from app.database.models import ReportReason
 from app.services import moderation
-from app.ui import common
+from app.ui.components import actions
 
 
 @st.dialog("Reportar")
@@ -48,7 +48,7 @@ def report_dialog(
                 if also_block:
                     moderation.block(s, reporter_id, reported_id)
 
-            common.run_action(_report, "Reporte enviado. ¡Gracias por avisarnos!")
+            actions.run_action(_report, "Reporte enviado. ¡Gracias por avisarnos!")
 
 
 @st.dialog("Bloquear usuario")
@@ -62,7 +62,7 @@ def block_dialog(blocker_id: int, blocked_id: int, blocked_name: str) -> None:
         "- Puedes desbloquearlo cuando quieras desde **Personas → Bloqueados**."
     )
     if st.button("Bloquear", type="primary", icon="🚫"):
-        common.run_action(
+        actions.run_action(
             lambda s: moderation.block(s, blocker_id, blocked_id),
             f"Bloqueaste a {blocked_name}",
         )

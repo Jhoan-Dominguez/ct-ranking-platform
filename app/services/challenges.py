@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import (
+from app.database.models import (
     Challenge,
     ChallengeKind,
     ChallengeParticipant,

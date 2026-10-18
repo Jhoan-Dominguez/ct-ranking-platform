@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.db.session import session_scope
-from app.services import academics, accounts, challenge_rules, challenges, forum, moderation, social
-from app.ui import common
+from app.auth import accounts
+from app.database.session import session_scope
+from app.services import academics, challenge_rules, challenges, forum, moderation, social
+from app.ui.components import formatting, session, widgets
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
 
     # Los retos automáticos se re-evalúan al entrar al inicio.
     with session_scope() as s:
@@ -31,10 +32,10 @@ def render() -> None:
         position = next((i for i, e in enumerate(board, 1) if e.user.id == user.id), None)
 
         cols = st.columns(5)
-        cols[0].metric("Promedio general", common.fmt_grade(summary.general_average))
+        cols[0].metric("Promedio general", formatting.fmt_grade(summary.general_average))
         cols[1].metric(
             f"Promedio semestre {user.current_semester}",
-            common.fmt_grade(summary.current_semester_average),
+            formatting.fmt_grade(summary.current_semester_average),
         )
         cols[2].metric("Puntos en retos", my_score.score if my_score else 0)
         cols[3].metric("Posición", f"#{position}" if position else "—")
@@ -74,7 +75,7 @@ def render() -> None:
                 st.caption("Aún no has recibido mensajes de apoyo.")
             for m in inbox:
                 with st.container(border=True):
-                    common.user_chip(m.sender, 28, common.fmt_dt(m.created_at))
+                    widgets.user_chip(m.sender, 28, formatting.fmt_dt(m.created_at))
                     st.write(m.message)
 
             st.subheader("👀 Actividad de quienes sigues")
@@ -86,4 +87,4 @@ def render() -> None:
             if not activity:
                 st.caption("Sigue a otras personas para ver sus logros aquí.")
             for a in activity:
-                common.user_chip(a.user, 28, f"completó «{a.challenge_title}»")
+                widgets.user_chip(a.user, 28, f"completó «{a.challenge_title}»")

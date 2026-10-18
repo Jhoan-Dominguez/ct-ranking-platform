@@ -7,12 +7,14 @@ import plotly.express as px
 import streamlit as st
 from sqlalchemy import select
 
-from app.config import get_settings
-from app.db.models import ReportReason, ReportStatus, Role, User
-from app.db.session import session_scope
-from app.services import academics, accounts, admin, auth, challenges, forum, moderation
-from app.ui import common
-from app.views.academics import credits_chart
+from app import auth
+from app.auth import accounts
+from app.core.config import get_settings
+from app.database.models import ReportReason, ReportStatus, Role, User
+from app.database.session import session_scope
+from app.services import academics, admin, challenges, forum, moderation
+from app.ui.components import actions, formatting, rankings, session, widgets
+from app.ui.components.charts import credits_chart
 
 STUDENT_COLUMNS = {
     "promedio_general": st.column_config.NumberColumn("Prom. general", format="%.2f"),
@@ -128,7 +130,7 @@ def _student_detail(s, all_users: list[User]) -> None:
     passing = get_settings().grade_passing
 
     head, info = st.columns([1, 4])
-    head.markdown(common.avatar_html(u, 110), unsafe_allow_html=True)
+    head.markdown(widgets.avatar_html(u, 110), unsafe_allow_html=True)
     with info:
         st.subheader(f"{u.full_name} (@{u.username})")
         st.caption(
@@ -136,8 +138,8 @@ def _student_detail(s, all_users: list[User]) -> None:
             f"{u.total_semesters} · {u.university or '—'} · código {u.student_code or '—'}"
         )
         st.caption(
-            f"Registrado {common.fmt_dt(u.created_at)} · "
-            f"último ingreso {common.fmt_dt(u.last_login)}"
+            f"Registrado {formatting.fmt_dt(u.created_at)} · "
+            f"último ingreso {formatting.fmt_dt(u.last_login)}"
             f" · rol {u.role} · {'activo' if u.is_active else 'deshabilitado'}"
         )
     at_risk = any(
@@ -148,8 +150,8 @@ def _student_detail(s, all_users: list[User]) -> None:
         st.error("⚠️ Estudiante en riesgo académico: considera hacerle seguimiento.")
 
     cols = st.columns(7)
-    cols[0].metric("Prom. general", common.fmt_grade(summary.general_average))
-    cols[1].metric("Prom. semestre", common.fmt_grade(summary.current_semester_average))
+    cols[0].metric("Prom. general", formatting.fmt_grade(summary.general_average))
+    cols[1].metric("Prom. semestre", formatting.fmt_grade(summary.current_semester_average))
     cols[2].metric("Créditos aprobados", summary.passed_credits)
     cols[3].metric("Reprobadas", summary.failed)
     cols[4].metric("Retos completados", sum(1 for p in detail.participations if p.completed_at))
@@ -273,7 +275,7 @@ def _groups(s) -> None:
     cols = st.columns(6)
     cols[0].metric("Estudiantes", len(group))
     mean = group["promedio_general"].mean()
-    cols[1].metric("Promedio del grupo", common.fmt_grade(None if pd.isna(mean) else mean))
+    cols[1].metric("Promedio del grupo", formatting.fmt_grade(None if pd.isna(mean) else mean))
     cols[2].metric("En riesgo", int(group["en_riesgo"].sum()))
     cols[3].metric("Retos completados (media)", f"{group['retos_completados'].mean():.1f}")
     cols[4].metric("Publicaciones", int(group["publicaciones"].sum()))
@@ -296,7 +298,7 @@ def _groups(s) -> None:
             fig.update_layout(height=max(250, 28 * len(chart)), margin={"t": 10})
             st.plotly_chart(fig, width="stretch")
     with right:
-        common.leaderboard_banner(s, "Ranking del grupo", user_ids=set(group["id"]))
+        rankings.leaderboard_banner(s, "Ranking del grupo", user_ids=set(group["id"]))
     st.dataframe(group, hide_index=True, width="stretch", column_config=STUDENT_COLUMNS)
     st.download_button(
         "Descargar CSV", group.to_csv(index=False).encode(), "grupo.csv", "text/csv", icon="⬇️"
@@ -325,13 +327,13 @@ def _content(s, admin_user: User) -> None:
     )
     if target is not None and c2.button(f"Eliminar de {kind.lower()}", icon="🗑️"):
         target = int(target)
-        actions = {
+        deleters = {
             "Publicaciones": lambda s2: forum.delete_post(s2, admin_user, target),
             "Comentarios": lambda s2: forum.delete_comment(s2, admin_user, target),
             "Retos": lambda s2: challenges.delete_challenge(s2, admin_user, target),
             "Mensajes": lambda s2: admin.delete_message(s2, target),
         }
-        common.run_action(actions[kind], "Elemento eliminado")
+        actions.run_action(deleters[kind], "Elemento eliminado")
 
 
 def _reports(s, admin_user: User) -> None:
@@ -386,7 +388,7 @@ def _reports(s, admin_user: User) -> None:
         return
     r = next(x for x in reports if x.id == report_id)
     with st.container(border=True):
-        common.user_chip(r.reported, 36, f"reportado por @{r.reporter.username}")
+        widgets.user_chip(r.reported, 36, f"reportado por @{r.reporter.username}")
         st.markdown(
             f"**Motivo:** {moderation.REASON_LABELS[ReportReason(r.reason)]}  \n"
             f"**Detalles:** {r.description or '—'}"
@@ -403,20 +405,20 @@ def _reports(s, admin_user: User) -> None:
             who = r.resolved_by.username if r.resolved_by else "—"
             st.info(
                 f"{moderation.STATUS_LABELS[ReportStatus(r.status)]} por @{who} el "
-                f"{common.fmt_dt(r.resolved_at)}. {r.admin_note}"
+                f"{formatting.fmt_dt(r.resolved_at)}. {r.admin_note}"
             )
             return
         note = st.text_input("Nota de resolución (opcional)", key=f"note_{r.id}")
         c1, c2, c3, c4 = st.columns(4)
         if c1.button("Resolver", icon="✅", type="primary", key=f"resolve_{r.id}"):
-            common.run_action(
+            actions.run_action(
                 lambda s2: moderation.close_report(
                     s2, admin_user, r.id, ReportStatus.RESOLVED, note
                 ),
                 "Reporte resuelto",
             )
         if c2.button("Descartar", icon="🚫", key=f"dismiss_{r.id}"):
-            common.run_action(
+            actions.run_action(
                 lambda s2: moderation.close_report(
                     s2, admin_user, r.id, ReportStatus.DISMISSED, note
                 ),
@@ -435,7 +437,7 @@ def _reports(s, admin_user: User) -> None:
                     s2, admin_user, r.id, ReportStatus.RESOLVED, note or "Contenido eliminado"
                 )
 
-            common.run_action(_delete_content, "Contenido eliminado y reporte resuelto")
+            actions.run_action(_delete_content, "Contenido eliminado y reporte resuelto")
         if r.reported.is_active and c4.button(
             "Deshabilitar usuario", icon="⛔", key=f"disable_{r.id}"
         ):
@@ -446,7 +448,7 @@ def _reports(s, admin_user: User) -> None:
                     s2, admin_user, r.id, ReportStatus.RESOLVED, note or "Cuenta deshabilitada"
                 )
 
-            common.run_action(_disable, "Usuario deshabilitado y reporte resuelto")
+            actions.run_action(_disable, "Usuario deshabilitado y reporte resuelto")
 
 
 def _users(s, admin_user: User, all_users: list[User]) -> None:
@@ -474,11 +476,11 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
             format_func=lambda r: "Estudiante" if r == Role.STUDENT else "Administrador",
         )
         if st.button("Guardar rol", disabled=target.id == admin_user.id):
-            common.run_action(lambda s2: admin.set_role(s2, user_id, role), "Rol actualizado")
+            actions.run_action(lambda s2: admin.set_role(s2, user_id, role), "Rol actualizado")
     with c2:
         label = "Deshabilitar cuenta" if target.is_active else "Habilitar cuenta"
         if st.button(label, disabled=target.id == admin_user.id):
-            common.run_action(
+            actions.run_action(
                 lambda s2: auth.set_active(s2, s2.get(User, user_id), not target.is_active),
                 "Estado de la cuenta actualizado",
             )
@@ -486,12 +488,12 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
         st.caption("No puedes cambiar tu propio rol ni deshabilitar tu cuenta.")
     if target.pending_deletion:
         st.warning(
-            f"Eliminación programada para el {common.fmt_dt(target.deletion_scheduled_for)} "
-            f"(solicitada el {common.fmt_dt(target.deletion_requested_at)}).",
+            f"Eliminación programada para el {formatting.fmt_dt(target.deletion_scheduled_for)} "
+            f"(solicitada el {formatting.fmt_dt(target.deletion_requested_at)}).",
             icon="⚠️",
         )
         if st.button("Cancelar la eliminación de esta cuenta"):
-            common.run_action(
+            actions.run_action(
                 lambda s2: accounts.cancel_deletion(s2, s2.get(User, user_id)),
                 "Eliminación cancelada",
             )
@@ -500,7 +502,7 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     if not user.is_admin:
         st.error("No tienes permisos para ver esta página.")
         st.stop()

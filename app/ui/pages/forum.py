@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.db.session import session_scope
+from app.database.session import session_scope
 from app.services import forum, moderation, social
-from app.ui import common
-from app.ui.moderation import report_dialog
+from app.ui.components import actions, formatting, session, widgets
+from app.ui.components.moderation import report_dialog
 
 
 @st.dialog("Nueva publicación", width="large")
@@ -27,7 +27,7 @@ def _new_post_dialog(user_id: int) -> None:
                 )
                 st.session_state["post_id"] = post.id
 
-            common.run_action(_create, "Publicación creada")
+            actions.run_action(_create, "Publicación creada")
 
 
 def _post_list(user) -> None:
@@ -61,10 +61,10 @@ def _post_list(user) -> None:
                         f":blue-badge[{p.category}] "
                         + " ".join(f":gray-badge[#{t}]" for t in p.tags.split(",") if t)
                     )
-                    common.user_chip(
+                    widgets.user_chip(
                         p.author,
                         26,
-                        f"{common.fmt_dt(p.created_at)} · {row.comments} 💬 · {row.likes} 👍",
+                        f"{formatting.fmt_dt(p.created_at)} · {row.comments} 💬 · {row.likes} 👍",
                     )
                 if right.button("Abrir", key=f"open_{p.id}", width="stretch"):
                     st.session_state["post_id"] = p.id
@@ -91,26 +91,26 @@ def _post_detail(user, post_id: int) -> None:
             f":blue-badge[{post.category}] "
             + " ".join(f":gray-badge[#{t}]" for t in post.tags.split(",") if t)
         )
-        common.user_chip(post.author, 36, common.fmt_dt(post.created_at))
+        widgets.user_chip(post.author, 36, formatting.fmt_dt(post.created_at))
         with st.container(border=True):
             st.markdown(post.body)
 
-        actions = st.columns([1, 1, 1, 1, 2])
-        if actions[0].button(
+        buttons = st.columns([1, 1, 1, 1, 2])
+        if buttons[0].button(
             f"{'💙' if liked else '👍'} {len(post.likes)}", help="Me gusta", key="like"
         ):
-            common.run_action(lambda s2: forum.toggle_like(s2, post_id, user.id))
+            actions.run_action(lambda s2: forum.toggle_like(s2, post_id, user.id))
         if can_moderate:
             label = "Reabrir" if post.is_solved else "Marcar resuelta"
-            if actions[1].button(label, icon="✅"):
-                common.run_action(
+            if buttons[1].button(label, icon="✅"):
+                actions.run_action(
                     lambda s2: forum.set_solved(s2, user, post_id, not post.is_solved),
                     "Estado actualizado",
                 )
-            if actions[2].button("Eliminar", icon="🗑️"):
+            if buttons[2].button("Eliminar", icon="🗑️"):
                 st.session_state.pop("post_id", None)
-                common.run_action(lambda s2: forum.delete_post(s2, user, post_id), "Eliminada")
-        if user.id != post.author_id and actions[3].button("Reportar", icon="🚩"):
+                actions.run_action(lambda s2: forum.delete_post(s2, user, post_id), "Eliminada")
+        if user.id != post.author_id and buttons[3].button("Reportar", icon="🚩"):
             report_dialog(user.id, post.author_id, post.author.display_name, post_id=post.id)
 
         comments = [c for c in post.comments if c.author_id not in hidden]
@@ -119,12 +119,12 @@ def _post_detail(user, post_id: int) -> None:
             with st.container(border=True):
                 head, tail = st.columns([6, 1])
                 with head:
-                    common.user_chip(c.author, 28, common.fmt_dt(c.created_at))
+                    widgets.user_chip(c.author, 28, formatting.fmt_dt(c.created_at))
                     st.markdown(c.body)
                 if (user.is_admin or user.id == c.author_id) and tail.button(
                     "🗑️", key=f"del_c_{c.id}", help="Eliminar comentario"
                 ):
-                    common.run_action(
+                    actions.run_action(
                         lambda s2, cid=c.id: forum.delete_comment(s2, user, cid), "Eliminado"
                     )
                 if user.id != c.author_id and tail.button(
@@ -135,11 +135,11 @@ def _post_detail(user, post_id: int) -> None:
     with st.form("comment", clear_on_submit=True):
         body = st.text_area("Escribe una respuesta o comentario", height=120)
         if st.form_submit_button("Comentar", type="primary"):
-            common.run_action(lambda s: forum.add_comment(s, post_id, user.id, body), "Comentado")
+            actions.run_action(lambda s: forum.add_comment(s, post_id, user.id, body), "Comentado")
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     post_id = st.session_state.get("post_id")
     if post_id:
         _post_detail(user, post_id)

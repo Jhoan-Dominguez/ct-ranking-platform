@@ -33,7 +33,7 @@ up: env ## Levanta PostgreSQL, Keycloak y Mailpit; configura Keycloak e iniciali
 	$(PYTHON) scripts/wait_for_services.py
 	$(PYTHON) scripts/configure_keycloak.py
 	$(PYTHON) scripts/write_streamlit_secrets.py
-	$(PYTHON) -m app.db.init_db
+	$(PYTHON) -m app.database.init_db
 
 down: ## Detiene y elimina los contenedores (conserva los datos)
 	$(COMPOSE) down
@@ -55,13 +55,13 @@ dev: up run ## Levanta los servicios y ejecuta la aplicación
 # ---------------------------------------------------------------- base de datos
 
 init-db: ## Crea tablas y datos base (retos globales, admin)
-	$(PYTHON) -m app.db.init_db
+	$(PYTHON) -m app.database.init_db
 
 seed-demo: ## Carga usuarios y datos de demostración
-	$(PYTHON) -m app.db.init_db --demo
+	$(PYTHON) -m app.database.init_db --demo
 
 reset-db: ## Borra y recrea todas las tablas de la app (¡pierde los datos!)
-	$(PYTHON) -m app.db.init_db --reset
+	$(PYTHON) -m app.database.init_db --reset
 
 purge-accounts: ## Elimina definitivamente las cuentas cuyo plazo de eliminación venció
 	$(PYTHON) -m app.jobs.purge_accounts

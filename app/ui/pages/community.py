@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.db.session import session_scope
-from app.services import accounts, challenges, moderation, social, users
-from app.ui import common
-from app.ui.moderation import actions_menu
+from app.auth import accounts
+from app.database.session import session_scope
+from app.services import challenges, moderation, social, users
+from app.ui.components import actions, formatting, session, widgets
+from app.ui.components.moderation import actions_menu
 
 
 @st.dialog("Enviar mensaje de apoyo")
@@ -22,7 +23,7 @@ def support_dialog(sender_id: int, recipient_id: int, recipient_name: str) -> No
     )
     message = st.text_area("Mensaje", max_chars=social.MAX_MESSAGE_LEN, key="support_msg")
     if st.button("Enviar 💌", type="primary"):
-        common.run_action(
+        actions.run_action(
             lambda s: social.send_support(s, sender_id, recipient_id, message),
             f"Mensaje enviado a {recipient_name}",
         )
@@ -35,12 +36,12 @@ def _person_row(me, person, following: set[int], key: str) -> None:
             subtitle = " · ".join(
                 x for x in (person.program, f"semestre {person.current_semester}") if x
             )
-            common.user_chip(person, 40, subtitle)
+            widgets.user_chip(person, 40, subtitle)
         if person.id in following:
             if b1.button("Dejar de seguir", key=f"unf_{key}_{person.id}", width="stretch"):
-                common.run_action(lambda s: social.unfollow(s, me.id, person.id))
+                actions.run_action(lambda s: social.unfollow(s, me.id, person.id))
         elif b1.button("Seguir", key=f"fol_{key}_{person.id}", type="primary", width="stretch"):
-            common.run_action(
+            actions.run_action(
                 lambda s: social.follow(s, me.id, person.id),
                 f"Ahora sigues a {person.display_name}",
             )
@@ -70,7 +71,7 @@ def _public_profile(me, person_id: int) -> None:
         score = next((e for e in board if e.user.id == person.id), None)
 
         left, right = st.columns([1, 3])
-        left.markdown(common.avatar_html(person, 140), unsafe_allow_html=True)
+        left.markdown(widgets.avatar_html(person, 140), unsafe_allow_html=True)
         with right:
             st.title(person.display_name)
             st.caption(f"@{person.username} · {person.full_name}")
@@ -105,12 +106,12 @@ def _public_profile(me, person_id: int) -> None:
         for part in done:
             st.markdown(
                 f"- **{part.challenge.title}** · {part.challenge.points} pts · "
-                f"{common.fmt_dt(part.completed_at)}"
+                f"{formatting.fmt_dt(part.completed_at)}"
             )
 
 
 def render() -> None:
-    me = common.require_user()
+    me = session.require_user()
     profile_id = st.session_state.get("profile_id")
     if profile_id:
         _public_profile(me, profile_id)
@@ -154,9 +155,9 @@ def render() -> None:
                 with st.container(border=True):
                     info, action = st.columns([5, 1], vertical_alignment="center")
                     with info:
-                        common.user_chip(person, 36)
+                        widgets.user_chip(person, 36)
                     if action.button("Desbloquear", key=f"unblock_{person.id}", width="stretch"):
-                        common.run_action(
+                        actions.run_action(
                             lambda s2, pid=person.id: moderation.unblock(s2, me.id, pid),
                             f"Desbloqueaste a {person.display_name}",
                         )

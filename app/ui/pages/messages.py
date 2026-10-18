@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.db.session import session_scope
+from app.database.session import session_scope
 from app.services import social
-from app.ui import common
-from app.ui.moderation import actions_menu
-from app.views.community import support_dialog
+from app.ui.components import formatting, session, widgets
+from app.ui.components.moderation import actions_menu
+from app.ui.pages.community import support_dialog
 
 
 def render() -> None:
-    user = common.require_user()
+    user = session.require_user()
     st.title("💌 Mensajes de apoyo")
     st.caption("Un «¡vamos, tú puedes!» a tiempo hace la diferencia.")
 
@@ -28,7 +28,7 @@ def render() -> None:
                     head, action, more = st.columns([5, 1, 0.8], vertical_alignment="center")
                     with head:
                         new = " 🆕" if m.id in unread else ""
-                        common.user_chip(m.sender, 32, common.fmt_dt(m.created_at) + new)
+                        widgets.user_chip(m.sender, 32, formatting.fmt_dt(m.created_at) + new)
                         st.markdown(f"> {m.message}")
                     if action.button("Responder", key=f"reply_{m.id}", icon="↩️"):
                         support_dialog(user.id, m.sender_id, m.sender.display_name)
@@ -40,7 +40,7 @@ def render() -> None:
                 st.info("No has enviado mensajes. Ve a **Personas** para animar a alguien.")
             for m in messages:
                 with st.container(border=True):
-                    common.user_chip(m.recipient, 32, f"para · {common.fmt_dt(m.created_at)}")
+                    widgets.user_chip(m.recipient, 32, f"para · {formatting.fmt_dt(m.created_at)}")
                     st.markdown(f"> {m.message}")
         if unread:
             social.mark_all_read(s, user.id)

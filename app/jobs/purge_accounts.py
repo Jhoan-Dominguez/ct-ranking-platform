@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 import threading
 
-from app.db.session import session_scope
-from app.services import accounts
+from app.auth import accounts
+from app.database.session import session_scope
 
 log = logging.getLogger(__name__)
 INTERVAL_S = 3600

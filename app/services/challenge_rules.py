@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
-from app.db.models import (
+from app.core.config import get_settings
+from app.database.models import (
     Challenge,
     Comment,
     Follow,

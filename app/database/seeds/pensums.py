@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.db.models import SubjectCategory
+from app.database.models import SubjectCategory
 
 C = SubjectCategory.SCIENCES
 H = SubjectCategory.HUMANITIES

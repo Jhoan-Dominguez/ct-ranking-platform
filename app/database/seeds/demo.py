@@ -15,8 +15,8 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.data.pensums import SOFTWARE_ENGINEERING
-from app.db.models import (
+from app import auth
+from app.database.models import (
     Challenge,
     ChallengeKind,
     ChallengeParticipant,
@@ -30,8 +30,9 @@ from app.db.models import (
     User,
     Visibility,
 )
-from app.db.session import session_scope
-from app.services import academics, auth, challenges
+from app.database.seeds.pensums import SOFTWARE_ENGINEERING
+from app.database.session import session_scope
+from app.services import academics, challenges
 
 DEMO_PASSWORD = "Demo1234"
 PENSUM = SOFTWARE_ENGINEERING
