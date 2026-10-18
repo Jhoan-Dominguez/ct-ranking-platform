@@ -25,6 +25,9 @@ class Settings:
     keycloak_realm: str
     keycloak_client_id: str
     keycloak_client_secret: str
+    # Cliente que sólo verifica usuario y contraseña (paso 1 del login con 2FA).
+    keycloak_pwcheck_client_id: str
+    keycloak_pwcheck_client_secret: str
     admin_username: str
     admin_email: str
     admin_password: str
@@ -71,6 +74,10 @@ def get_settings() -> Settings:
         keycloak_realm=os.getenv("KEYCLOAK_REALM", "ct-ranking"),
         keycloak_client_id=os.getenv("KEYCLOAK_CLIENT_ID", "ct-ranking-app"),
         keycloak_client_secret=os.getenv("KEYCLOAK_CLIENT_SECRET", "ct-ranking-dev-secret"),
+        keycloak_pwcheck_client_id=os.getenv("KEYCLOAK_PWCHECK_CLIENT_ID", "ct-ranking-pwcheck"),
+        keycloak_pwcheck_client_secret=os.getenv(
+            "KEYCLOAK_PWCHECK_CLIENT_SECRET", "ct-ranking-pwcheck-dev-secret"
+        ),
         admin_username=os.getenv("APP_ADMIN_USERNAME", "admin"),
         admin_email=os.getenv("APP_ADMIN_EMAIL", "admin@ctranking.local"),
         admin_password=os.getenv("APP_ADMIN_PASSWORD", "Admin123!"),

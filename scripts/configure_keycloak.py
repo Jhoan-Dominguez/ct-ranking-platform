@@ -87,8 +87,81 @@ def main() -> None:
     requests.put(
         f"{api}/clients/{client['id']}", headers=headers, json=client, timeout=TIMEOUT
     ).raise_for_status()
+    configure_password_check(api, headers, settings)
     google = configure_google(api, headers, settings)
-    print(f"Keycloak configurado: SMTP {smtp['host']}:{smtp['port']}, app {app_url}, {google}")
+    print(
+        f"Keycloak configurado: SMTP {smtp['host']}:{smtp['port']}, app {app_url}, "
+        f"verificación de contraseña ({settings.keycloak_pwcheck_client_id}), {google}"
+    )
+
+
+PASSWORD_ONLY_FLOW = "direct grant - solo contraseña"
+
+
+def configure_password_check(api: str, headers: dict, settings) -> None:
+    """Cliente para el paso 1 del login: verifica usuario y contraseña sin pedir el código 2FA.
+
+    El flujo "direct grant" del realm exige el OTP a quien tiene 2FA y responde lo mismo ante una
+    contraseña incorrecta y ante un código faltante. Este cliente usa una copia del flujo sin el
+    paso OTP, así la app sabe si la contraseña es correcta antes de pedir el código. Sus tokens
+    se descartan y duran 60 s; el login real (paso 2) sigue usando el cliente principal con OTP.
+    """
+    flows = requests.get(f"{api}/authentication/flows", headers=headers, timeout=TIMEOUT).json()
+    flow = next((f for f in flows if f["alias"] == PASSWORD_ONLY_FLOW), None)
+    if flow is None:
+        requests.post(
+            f"{api}/authentication/flows/direct%20grant/copy",
+            headers=headers,
+            json={"newName": PASSWORD_ONLY_FLOW},
+            timeout=TIMEOUT,
+        ).raise_for_status()
+        executions = requests.get(
+            f"{api}/authentication/flows/{requests.utils.quote(PASSWORD_ONLY_FLOW)}/executions",
+            headers=headers,
+            timeout=TIMEOUT,
+        ).json()
+        # Elimina el subflujo "Conditional OTP" (nivel 0, sin providerId) y con él sus pasos.
+        for execution in executions:
+            if execution["level"] == 0 and "OTP" in execution.get("displayName", ""):
+                requests.delete(
+                    f"{api}/authentication/executions/{execution['id']}",
+                    headers=headers,
+                    timeout=TIMEOUT,
+                ).raise_for_status()
+        flows = requests.get(f"{api}/authentication/flows", headers=headers, timeout=TIMEOUT).json()
+        flow = next(f for f in flows if f["alias"] == PASSWORD_ONLY_FLOW)
+
+    client = {
+        "clientId": settings.keycloak_pwcheck_client_id,
+        "name": "CT Ranking - verificación de contraseña",
+        "enabled": True,
+        "protocol": "openid-connect",
+        "publicClient": False,
+        "clientAuthenticatorType": "client-secret",
+        "secret": settings.keycloak_pwcheck_client_secret,
+        "standardFlowEnabled": False,
+        "directAccessGrantsEnabled": True,
+        "serviceAccountsEnabled": False,
+        "authenticationFlowBindingOverrides": {"direct_grant": flow["id"]},
+        "attributes": {"access.token.lifespan": "60", "use.refresh.tokens": "false"},
+    }
+    found = requests.get(
+        f"{api}/clients",
+        headers=headers,
+        params={"clientId": settings.keycloak_pwcheck_client_id},
+        timeout=TIMEOUT,
+    ).json()
+    if found:
+        requests.put(
+            f"{api}/clients/{found[0]['id']}",
+            headers=headers,
+            json={**found[0], **client},
+            timeout=TIMEOUT,
+        ).raise_for_status()
+    else:
+        requests.post(
+            f"{api}/clients", headers=headers, json=client, timeout=TIMEOUT
+        ).raise_for_status()
 
 
 def configure_google(api: str, headers: dict, settings) -> str:
