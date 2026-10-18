@@ -80,11 +80,66 @@ def main() -> None:
         "baseUrl": app_url,
         "redirectUris": [f"{app_url}/*"],
         "webOrigins": [app_url],
+        # Flujo de navegador (Authorization Code) para "Continuar con Google" vía st.login.
+        "standardFlowEnabled": True,
     }
+    client.setdefault("attributes", {})["post.logout.redirect.uris"] = "+"
     requests.put(
         f"{api}/clients/{client['id']}", headers=headers, json=client, timeout=TIMEOUT
     ).raise_for_status()
-    print(f"Keycloak configurado: SMTP {smtp['host']}:{smtp['port']}, app {app_url}")
+    google = configure_google(api, headers, settings)
+    print(f"Keycloak configurado: SMTP {smtp['host']}:{smtp['port']}, app {app_url}, {google}")
+
+
+def configure_google(api: str, headers: dict, settings) -> str:
+    """Crea o actualiza el proveedor de identidad "google", o lo quita si no hay credenciales.
+
+    - ``hostedDomain``: Keycloak sólo acepta cuentas de Google del dominio institucional.
+    - ``trustEmail``: Google ya verificó el correo, así que no se pide la activación por correo.
+    - El usuario local en Keycloak toma como username la parte antes de la @ del correo.
+    """
+    url = f"{api}/identity-provider/instances/google"
+    exists = requests.get(url, headers=headers, timeout=TIMEOUT).status_code == 200
+    if not settings.google_client_id:
+        if exists:
+            requests.delete(url, headers=headers, timeout=TIMEOUT).raise_for_status()
+        return "Google: deshabilitado (sin GOOGLE_CLIENT_ID)"
+    provider = {
+        "alias": "google",
+        "displayName": "Google",
+        "providerId": "google",
+        "enabled": True,
+        "trustEmail": True,
+        "firstBrokerLoginFlowAlias": "first broker login",
+        "config": {
+            "clientId": settings.google_client_id,
+            "clientSecret": settings.google_client_secret,
+            "hostedDomain": settings.student_email_domain,
+            "defaultScope": "openid profile email",
+            "syncMode": "IMPORT",
+        },
+    }
+    if exists:
+        requests.put(url, headers=headers, json=provider, timeout=TIMEOUT).raise_for_status()
+    else:
+        requests.post(
+            f"{api}/identity-provider/instances", headers=headers, json=provider, timeout=TIMEOUT
+        ).raise_for_status()
+    mappers_url = f"{url}/mappers"
+    mappers = requests.get(mappers_url, headers=headers, timeout=TIMEOUT).json()
+    if not any(m["name"] == "username-from-email" for m in mappers):
+        requests.post(
+            mappers_url,
+            headers=headers,
+            json={
+                "name": "username-from-email",
+                "identityProviderAlias": "google",
+                "identityProviderMapper": "oidc-username-idp-mapper",
+                "config": {"syncMode": "IMPORT", "template": "${CLAIM.email | localpart}"},
+            },
+            timeout=TIMEOUT,
+        ).raise_for_status()
+    return f"Google: habilitado sólo para @{settings.student_email_domain}"
 
 
 if __name__ == "__main__":

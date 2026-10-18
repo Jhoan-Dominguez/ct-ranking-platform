@@ -44,6 +44,11 @@ class Settings:
     account_deletion_days: int
     # Dominio obligatorio del correo de los estudiantes (los administradores están exentos).
     student_email_domain: str
+    # Inicio de sesión con Google (vía Keycloak). Vacío = deshabilitado.
+    google_client_id: str
+    google_client_secret: str
+    # Secreto para firmar la cookie de sesión de st.login (OIDC).
+    auth_cookie_secret: str
 
 
 def _database_url() -> str:
@@ -86,4 +91,7 @@ def get_settings() -> Settings:
         .strip()
         .lstrip("@")
         .lower(),
+        google_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
+        google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", "").strip(),
+        auth_cookie_secret=os.getenv("AUTH_COOKIE_SECRET", "").strip(),
     )

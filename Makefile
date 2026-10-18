@@ -32,6 +32,7 @@ up: env ## Levanta PostgreSQL, Keycloak y Mailpit; configura Keycloak e iniciali
 	$(COMPOSE) up -d
 	$(PYTHON) scripts/wait_for_services.py
 	$(PYTHON) scripts/configure_keycloak.py
+	$(PYTHON) scripts/write_streamlit_secrets.py
 	$(PYTHON) -m app.db.init_db
 
 down: ## Detiene y elimina los contenedores (conserva los datos)
@@ -46,6 +47,7 @@ ps: ## Estado de los contenedores
 	$(COMPOSE) ps
 
 run: ## Ejecuta la aplicación Streamlit
+	@$(PYTHON) scripts/write_streamlit_secrets.py
 	$(VENV)/bin/streamlit run app/main.py --server.port $(APP_PORT)
 
 dev: up run ## Levanta los servicios y ejecuta la aplicación

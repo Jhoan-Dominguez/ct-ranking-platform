@@ -1,0 +1,59 @@
+"""Genera ``.streamlit/secrets.toml`` con la configuración de ``st.login`` (OIDC con Keycloak).
+
+Streamlit sólo lee la configuración de autenticación desde ``secrets.toml``, así que este
+script la arma a partir de ``.env``. Se ejecuta en ``make up`` y ``make run``. El archivo está en
+``.gitignore`` porque contiene secretos.
+
+El proveedor ``google`` apunta a Keycloak con ``kc_idp_hint=google``: Keycloak redirige directo
+a Google sin mostrar su propia página de login.
+"""
+
+from __future__ import annotations
+
+import secrets
+import sys
+import tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.config import ROOT_DIR, get_settings
+
+SECRETS_FILE = ROOT_DIR / ".streamlit" / "secrets.toml"
+
+
+def _toml_str(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def main() -> None:
+    settings = get_settings()
+    cookie_secret = settings.auth_cookie_secret
+    if not cookie_secret and SECRETS_FILE.exists():
+        # Conserva el secreto ya generado para no invalidar las sesiones existentes.
+        current = tomllib.loads(SECRETS_FILE.read_text(encoding="utf-8"))
+        cookie_secret = current.get("auth", {}).get("cookie_secret", "")
+    cookie_secret = cookie_secret or secrets.token_urlsafe(48)
+
+    realm_url = f"{settings.keycloak_url}/realms/{settings.keycloak_realm}"
+    lines = [
+        "# Generado por scripts/write_streamlit_secrets.py a partir de .env. No editar a mano.",
+        "[auth]",
+        f"redirect_uri = {_toml_str(settings.app_url + '/oauth2callback')}",
+        f"cookie_secret = {_toml_str(cookie_secret)}",
+        "",
+        "[auth.google]",
+        f"client_id = {_toml_str(settings.keycloak_client_id)}",
+        f"client_secret = {_toml_str(settings.keycloak_client_secret)}",
+        f"server_metadata_url = {_toml_str(realm_url + '/.well-known/openid-configuration')}",
+        'client_kwargs = { scope = "openid email profile", prompt = "login" }',
+        'authorize_params = { kc_idp_hint = "google" }',
+        "",
+    ]
+    SECRETS_FILE.parent.mkdir(exist_ok=True)
+    SECRETS_FILE.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Configuración de st.login escrita en {SECRETS_FILE.relative_to(ROOT_DIR)}")
+
+
+if __name__ == "__main__":
+    main()
