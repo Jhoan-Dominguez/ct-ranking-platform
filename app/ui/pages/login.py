@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 
 from app import auth
@@ -24,44 +26,101 @@ def _resend(login: str) -> None:
         )
 
 
-def _login_tab() -> None:
+OTP_PENDING = "_otp_pending"
+OTP_WINDOW_S = 300  # tiempo máximo entre el paso 1 (contraseña) y el paso 2 (código)
+
+
+def _finish_login(user_id: int, name: str, pending_deletion: bool) -> None:
+    st.session_state.pop(OTP_PENDING, None)
+    st.session_state.pop(REGISTERED_EMAIL, None)
+    st.session_state["user_id"] = user_id
+    if not pending_deletion:  # una cuenta en eliminación sólo ve la pantalla de cancelación
+        actions.flash(f"¡Bienvenido, {name}!", "👋")
+    st.rerun()
+
+
+def _password_step() -> None:
+    """Paso 1: usuario/correo y contraseña. El código 2FA se pide después, sólo si hace falta."""
     with st.form("login"):
         username = st.text_input("Usuario o correo")
         password = st.text_input("Contraseña", type="password")
-        otp = ""
-        if auth.two_factor_supported():
-            otp = st.text_input(
-                "Código de verificación (2FA)",
-                max_chars=6,
-                placeholder="Sólo si activaste la verificación en dos pasos",
-                help="Código de 6 dígitos de tu app autenticadora "
-                "(Google Authenticator, Microsoft Authenticator, FreeOTP…).",
-            )
         if st.form_submit_button("Ingresar", type="primary", width="stretch"):
             st.session_state.pop(UNVERIFIED_LOGIN, None)
             try:
                 with session_scope() as s:
-                    user = auth.login(s, username, password, otp or None)
-                    user_id, name, pending = user.id, user.display_name, user.pending_deletion
+                    user = auth.begin_login(s, username, password)
+                    done = (user.id, user.display_name, user.pending_deletion) if user else None
             except auth.EmailNotVerifiedError as exc:
                 st.session_state[UNVERIFIED_LOGIN] = exc.login
             except auth.AuthError as exc:
                 st.error(str(exc))
             else:
-                st.session_state.pop(REGISTERED_EMAIL, None)
-                st.session_state["user_id"] = user_id
-                if not pending:  # una cuenta en eliminación sólo ve la pantalla de cancelación
-                    actions.flash(f"¡Bienvenido, {name}!", "👋")
+                if done:
+                    _finish_login(*done)
+                # Contraseña correcta y la cuenta tiene 2FA: pasar al paso 2. La contraseña se
+                # guarda sólo en la memoria de esta sesión y por un máximo de 5 minutos.
+                st.session_state[OTP_PENDING] = {
+                    "login": username.strip(),
+                    "password": password,
+                    "expires": time.time() + OTP_WINDOW_S,
+                }
                 st.rerun()
+
+
+def _otp_step(pending: dict) -> None:
+    """Paso 2: código de la app autenticadora (sólo para cuentas con 2FA)."""
+    st.markdown("#### 🔐 Verificación en dos pasos")
+    st.write(
+        f"Hola **{pending['login']}**, tu cuenta tiene la verificación en dos pasos activada. "
+        "Escribe el código de 6 dígitos que muestra tu app autenticadora."
+    )
+    with st.form("otp"):
+        code = st.text_input(
+            "Código de verificación",
+            max_chars=6,
+            placeholder="123456",
+            help="Google Authenticator, Microsoft Authenticator, FreeOTP…",
+        )
+        if st.form_submit_button("Verificar", type="primary", width="stretch"):
+            if not code.strip():
+                st.error("Escribe el código de verificación.")
+                return
+            try:
+                with session_scope() as s:
+                    user = auth.login(s, pending["login"], pending["password"], code)
+                    done = (user.id, user.display_name, user.pending_deletion)
+            except auth.AuthError as exc:
+                message = str(exc)
+                if message == auth.INVALID_LOGIN:
+                    message = "El código no es correcto o ya venció. Escribe el código actual."
+                st.error(message)
+            else:
+                _finish_login(*done)
+    if st.button("← Volver", key="otp_back"):
+        st.session_state.pop(OTP_PENDING, None)
+        st.rerun()
+
+
+def _login_tab() -> None:
+    pending = st.session_state.get(OTP_PENDING)
+    if pending and pending["expires"] < time.time():
+        st.session_state.pop(OTP_PENDING, None)
+        st.warning("Pasó demasiado tiempo. Ingresa de nuevo tu usuario y contraseña.")
+        pending = None
+    if pending:
+        _otp_step(pending)
+        return
+
+    _password_step()
 
     if auth.google_login_enabled():
         _google_button()
 
-    pending = st.session_state.get(UNVERIFIED_LOGIN)
-    if pending:
-        st.warning(str(auth.EmailNotVerifiedError(pending)), icon="📧")
+    unverified = st.session_state.get(UNVERIFIED_LOGIN)
+    if unverified:
+        st.warning(str(auth.EmailNotVerifiedError(unverified)), icon="📧")
         if st.button("Reenviar correo de activación", icon="🔁"):
-            _resend(pending)
+            _resend(unverified)
 
     if auth.two_factor_supported():
         with st.expander("¿No recibiste el correo de activación?"):

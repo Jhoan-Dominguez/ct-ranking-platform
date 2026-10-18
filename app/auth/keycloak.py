@@ -41,6 +41,7 @@ class KeycloakClient:
         self.realm = s.keycloak_realm
         self.client_id = s.keycloak_client_id
         self.client_secret = s.keycloak_client_secret
+        self.pwcheck_client = (s.keycloak_pwcheck_client_id, s.keycloak_pwcheck_client_secret)
 
     @property
     def _token_url(self) -> str:
@@ -50,11 +51,12 @@ class KeycloakClient:
     def _admin_url(self) -> str:
         return f"{self.base}/admin/realms/{self.realm}"
 
-    def _post_token(self, data: dict) -> requests.Response:
+    def _post_token(self, data: dict, client: tuple[str, str] | None = None) -> requests.Response:
+        client_id, client_secret = client or (self.client_id, self.client_secret)
         try:
             return requests.post(
                 self._token_url,
-                data={"client_id": self.client_id, "client_secret": self.client_secret, **data},
+                data={"client_id": client_id, "client_secret": client_secret, **data},
                 timeout=TIMEOUT,
             )
         except requests.RequestException as exc:
@@ -63,13 +65,20 @@ class KeycloakClient:
                 "¿Ejecutaste `make up`?"
             ) from exc
 
-    def password_login(self, username: str, password: str, otp: str | None = None) -> Identity:
+    def password_login(
+        self, username: str, password: str, otp: str | None = None, *, password_only: bool = False
+    ) -> Identity:
         """Login con usuario y contraseña (flujo "direct grant"). Si el usuario tiene 2FA, el
-        flujo del realm exige además el código TOTP en el parámetro ``otp``."""
+        flujo del realm exige además el código TOTP en el parámetro ``otp``.
+
+        Con ``password_only`` se usa el cliente de verificación (``ct-ranking-pwcheck``), cuyo
+        flujo no pide OTP: sirve para comprobar la contraseña antes de pedir el código. Su token
+        se descarta."""
         data = {"grant_type": "password", "username": username, "password": password}
         if otp:
             data["otp"] = otp.strip().replace(" ", "")
-        resp = self._post_token({**data, "scope": "openid"})
+        client = self.pwcheck_client if password_only else None
+        resp = self._post_token({**data, "scope": "openid"}, client)
         if resp.status_code in (400, 401):
             description = resp.json().get("error_description", "").lower()
             if "disabled" in description:

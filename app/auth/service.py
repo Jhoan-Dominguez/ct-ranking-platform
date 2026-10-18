@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.errors import AuthError
+from app.auth.errors import INVALID_LOGIN, AuthError
 from app.auth.keycloak import Identity, KeycloakClient
 from app.auth.passwords import check_password, hash_password
 from app.auth.validation import (
@@ -103,6 +103,30 @@ def login(session: Session, username: str, password: str, otp: str | None = None
     user.last_login = datetime.now(UTC)
     session.flush()
     return user
+
+
+def begin_login(session: Session, username: str, password: str) -> User | None:
+    """Paso 1 del login: verifica usuario y contraseña.
+
+    - Si la contraseña es incorrecta (o la cuenta no está activada), lanza ``AuthError``.
+    - Si es correcta y la cuenta **no** tiene 2FA, completa el login y devuelve el usuario.
+    - Si es correcta y la cuenta tiene 2FA, devuelve ``None``: la UI debe pedir el código y
+      llamar a ``login(session, username, password, otp)`` (paso 2).
+    """
+    if not username.strip() or not password:
+        raise AuthError("Ingresa usuario y contraseña.")
+    if not _uses_keycloak():
+        return login(session, username, password)
+    client = KeycloakClient()
+    try:
+        identity = client.password_login(username, password, password_only=True)
+    except AuthError as exc:
+        if str(exc) == INVALID_LOGIN:  # en este paso no interviene ningún código
+            raise AuthError("Usuario o contraseña incorrectos.") from exc
+        raise
+    if client.otp_credentials(identity.external_id):
+        return None
+    return login(session, username, password)
 
 
 def register(
