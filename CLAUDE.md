@@ -67,6 +67,14 @@ Code flows `app/views/*` (Streamlit) → `app/services/*` (business logic) → `
   - 8 Software Engineering students at semesters 1 to 9, generated with seed 7.
   - Failed subjects are retaken as a new `Subject` row in the next semester.
   - Global challenges are completed only through the real rules.
+- **Academic plan expanders:**
+  - They use `_stateful_expander(label, key)` in `views/academics.py`.
+  - Streamlit derives an expander's id from its label too, so a label that changes (grades) would reset it. The open state is therefore remembered in `st.session_state["_academics_open_expanders"]` and restored before rendering.
+  - "Expandir/Colapsar todo" set those keys from an `on_click` callback.
+- **Sidebar hover-to-expand:**
+  - `app/ui/sidebar_hover.js` is injected once from `main.py` via `common.enable_sidebar_hover()` (`st.html` with `unsafe_allow_javascript=True`).
+  - It drives Streamlit's own expand and collapse buttons (`stExpandSidebarButton`, `stSidebarCollapseButton`) and reads `section[data-testid="stSidebar"][data-collapsed]`. Re-check these selectors after upgrading Streamlit.
+  - AppTest does not run JS. To test it, use a real browser: headless Firefox needs `ui.primaryPointerCapabilities=6` to report a mouse.
 - **Schema changes:** there are no migrations. Tables are created with `Base.metadata.create_all`, so changing an existing column requires `make reset-db`, or adding Alembic.
 
 ## Notes

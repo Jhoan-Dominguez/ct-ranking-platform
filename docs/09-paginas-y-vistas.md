@@ -15,6 +15,25 @@ Componentes compartidos (`app/ui/common.py`):
 | `challenge_ranking_banner()` | Banner del ranking de un reto (participantes, % de éxito, primero en completar, orden). |
 | `leaderboard_banner()` | Ranking por puntos (general, de amigos o de un grupo). |
 | `fmt_grade()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, fechas (zona horaria local) y etiquetas de categoría. |
+| `enable_sidebar_hover()` | Inyecta `app/ui/sidebar_hover.js`: con el menú lateral oculto, pasar el mouse por el borde izquierdo lo expande. |
+
+### Menú lateral: expandir al pasar el mouse
+
+Cuando el menú lateral está oculto (botón «<<»), una franja invisible de 16 px en el borde
+izquierdo de la ventana lo **expande al pasar el mouse**. Al sacar el mouse del menú, este se
+vuelve a ocultar tras 0,4 s.
+
+- **Sólo se re-oculta si se abrió por hover.** Si el usuario lo abre con el botón «>>», queda
+  fijo como siempre.
+- **Usa los botones nativos de Streamlit** (`stExpandSidebarButton` y `stSidebarCollapseButton`).
+  Así se respeta el estado interno del menú, incluido el que Streamlit guarda en `localStorage`.
+  Los selectores se verificaron en Streamlit 1.66; si una actualización los cambia, el script
+  simplemente deja de actuar sin romper la app.
+- **Sólo se activa con mouse** (`(hover: hover) and (pointer: fine)`). En pantallas táctiles no
+  hace nada.
+- **Se inyecta una sola vez por pestaña del navegador** con
+  `st.html(..., unsafe_allow_javascript=True)` dentro de `with st.sidebar`. Se protege con
+  `window.__ctSidebarHover` porque Streamlit vuelve a ejecutar el script en cada rerun.
 
 ---
 
@@ -85,6 +104,24 @@ Promedio general, promedio del semestre actual, créditos aprobados, materias ap
 reprobadas, y semestre actual sobre el total. Debajo, una nota explica cómo se calculan los
 promedios.
 
+### Expandir y colapsar todo
+
+Las pestañas «Semestre actual», «Historia académica» y «Plan completo» tienen, arriba a la
+derecha, los botones **Expandir todo** y **Colapsar todo**. Abren o cierran de una vez todos los
+menús **de esa pestaña**: las tarjetas de materia en las dos primeras y los semestres en «Plan
+completo». Así se ve el detalle de cada elemento sin abrirlos uno por uno.
+
+Cómo funciona:
+
+- **Estado en la sesión.** Cada expander tiene una `key` estable: `subject_expander_<id>` para
+  las materias y `plan_semester_expander_<n>` para los semestres. Los botones fijan su estado en
+  `st.session_state` mediante un callback.
+- **Memoria propia para los títulos que cambian.** Streamlit identifica un expander también por
+  su título, que aquí incluye notas y promedios. Por eso la vista guarda el estado abierto o
+  cerrado en `st.session_state["_academics_open_expanders"]` y lo restaura antes de dibujarlo.
+  Así, una materia abierta **sigue abierta** después de agregar o editar un ítem, aunque cambie
+  su nota.
+
 ### Pestaña "Semestre actual (N)"
 
 Una **tarjeta expandible por materia** del semestre actual. Su título muestra el estado, el
@@ -104,18 +141,34 @@ no tiene nota. Al expandir:
 
 ### Pestaña "Historia académica"
 
-1. **Gráfica de avance de créditos**: barras horizontales apiladas, en porcentaje del plan, por
-   categoría (🔬 Ciencias, 📜 Humanidades, 💻 Tecnología, 🌐 Idiomas) más una barra **📊 Total**.
+Arriba, las dos gráficas se muestran **lado a lado**, en dos columnas con la misma altura
+(320 px):
+
+1. **Izquierda: gráfica de avance de créditos**. Barras horizontales apiladas, en porcentaje del
+   plan, por categoría (🔬 Ciencias, 📜 Humanidades, 💻 Tecnología, 🌐 Idiomas) más una barra
+   **📊 Total**. La leyenda va debajo, en el orden Aprobados, Cursando, Por cursar.
    - **Azul claro** (`#7CC6F2`): créditos **aprobados**.
    - **Gris** (`#9CA3AF`): créditos que se están **cursando**.
    - Gris muy tenue: créditos por cursar. Al final de la barra se indica el porcentaje cubierto
      y el total de créditos de la categoría.
-   - Encima aparece el resumen: *"X aprobados + Y cursando de Z créditos del plan (N %)"*.
+   - Encima aparece el resumen: *"Avance de créditos · X aprobados + Y cursando de Z (N %)"*.
    - El *hover* muestra los créditos exactos.
-2. **Gráfica de evolución del promedio** por semestre, con una línea roja de aprobación y una
-   línea verde del promedio general.
-3. **Semestres anteriores al actual:** para cada uno, un encabezado con su promedio y créditos,
-   y debajo las tarjetas de sus materias (las mismas de la pestaña "Semestre actual").
+2. **Derecha: gráfica de evolución del promedio** por semestre. Una leyenda debajo identifica
+   cada línea:
+   - **Promedio del semestre**: azul (`#4F46E5`), línea continua con marcadores.
+   - **Nota mínima aprobatoria (3)**: rojo (`#DC2626`), punteada.
+   - **Promedio general (x.xx)**: verde (`#16A34A`), discontinua.
+
+   Los valores de la leyenda se toman de `GRADE_PASSING` y del promedio general del estudiante.
+   Si aún no hay notas, la columna muestra «Aún no hay notas registradas».
+
+Debajo de las gráficas están los botones **Expandir todo / Colapsar todo**, que afectan a las
+materias de los semestres anteriores. Siguen los **semestres anteriores al actual**: para cada
+uno, un encabezado con su promedio y créditos, y debajo las tarjetas de sus materias (las mismas
+de la pestaña "Semestre actual").
+
+En el detalle de estudiante del panel de administrador, la gráfica de avance de créditos se
+muestra a todo el ancho.
 
 ### Pestaña "Plan completo"
 

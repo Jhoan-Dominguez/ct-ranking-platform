@@ -91,7 +91,8 @@ ct-ranking-platform/
 │   │   ├── challenge_rules.py  # Reglas de verificación automática
 │   │   └── admin.py            # Métricas y consultas del panel
 │   ├── ui/
-│   │   └── common.py           # Sesión del usuario, run_action, avatares, banners
+│   │   ├── common.py           # Sesión del usuario, run_action, avatares, banners
+│   │   └── sidebar_hover.js    # Expande el menú lateral oculto al pasar el mouse
 │   └── views/                  # Una página por archivo: render()
 │       ├── login.py  home.py  forum.py  academics.py  challenges.py
 │       └── community.py  messages.py  profile.py  admin.py
@@ -170,6 +171,8 @@ archivos):
     `views/admin.py` vuelve a verificar el rol al renderizar.
 - **Barra lateral:** avatar, nombre, programa y botón "Cerrar sesión", que limpia el
   `session_state`.
+  - Si el menú está oculto, se expande al pasar el mouse por el borde izquierdo (ver
+    [Páginas y vistas](09-paginas-y-vistas.md#menú-lateral-expandir-al-pasar-el-mouse)).
 
 Si la base de datos no responde, `main.py` captura `OperationalError` y muestra un mensaje que
 indica ejecutar `make up` y `make init-db`.
