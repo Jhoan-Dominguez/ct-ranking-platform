@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 CT Ranking is a Streamlit platform for university students. It covers forums, the study plan with graded items and averages, challenges with rankings, follows and support messages, and an admin panel. The UI text and docs are in Spanish.
-- The original spec is `project.md`.
-- `PROYECTO.md` documents the features and design decisions. Keep it updated when adding features; the spec requires it.
+- The original spec is `docs/enunciado.md`.
+- `docs/resumen-del-proyecto.md` documents the features and design decisions. Keep it updated when adding features; the spec requires it.
 - `docs/` holds the full technical documentation (13 numbered Spanish markdown files plus `docs/README.md` as the index). Update the relevant file when changing models, services, pages or business rules. Check numbers stated in the docs (credits, counts) against the code or DB before writing them.
 
 ## Commands

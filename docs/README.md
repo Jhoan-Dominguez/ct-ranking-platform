@@ -39,6 +39,6 @@ make run         # http://localhost:8501
 ## Otros documentos del repositorio
 
 - [`../README.md`](../README.md): resumen corto del proyecto.
-- [`../PROYECTO.md`](../PROYECTO.md): qué se hizo y qué se agregó respecto al enunciado original.
-- [`../project.md`](../project.md): enunciado original del proyecto.
+- [`resumen-del-proyecto.md`](resumen-del-proyecto.md): qué se hizo y qué se agregó respecto al enunciado original.
+- [`enunciado.md`](enunciado.md): enunciado original del proyecto.
 - [`pensum.png`](pensum.png): plan de estudios de Ingeniería de Software usado en el catálogo.

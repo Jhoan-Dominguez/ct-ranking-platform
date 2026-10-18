@@ -2,7 +2,7 @@
 
 Plataforma académica y social para estudiantes, construida con **Streamlit**.
 
-> La documentación técnica completa está en [`docs/`](docs/README.md): arquitectura, modelo de
+> La documentación técnica completa está en [`docs/`](README.md): arquitectura, modelo de
 > datos, servicios, páginas, reglas de negocio, despliegue y solución de problemas. Este archivo
 > resume qué se construyó y qué se agregó respecto al enunciado. Los estudiantes
 discuten en foros, llevan su plan de estudios con notas y promedios, compiten en retos y se apoyan
@@ -191,7 +191,7 @@ intercambiables con `AUTH_PROVIDER`:
   - En desarrollo, **Mailpit** atrapa todos los correos y los muestra en
     http://localhost:8025.
   - En producción se usa un SMTP real.
-- Detalle completo en [`docs/14-cuentas-seguridad-y-moderacion.md`](docs/14-cuentas-seguridad-y-moderacion.md).
+- Detalle completo en [`docs/14-cuentas-seguridad-y-moderacion.md`](14-cuentas-seguridad-y-moderacion.md).
 
 ### Inicio (🏠)
 - Promedios, puntos y posición en el ranking.
