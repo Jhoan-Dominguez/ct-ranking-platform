@@ -1,0 +1,35 @@
+[project]
+name = "ct-ranking-platform"
+version = "0.1.0"
+description = "Plataforma académica y social para estudiantes construida con Streamlit"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", ".idea"]
+
+[tool.ruff.lint]
+# El orden de imports lo maneja isort; ruff se encarga del resto.
+select = ["E", "F", "W", "B", "UP", "SIM", "C4", "N", "RUF"]
+ignore = [
+    "RUF001",  # caracteres ambiguos: el contenido de la app está en español
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["app"]
+skip = [".venv", ".idea"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

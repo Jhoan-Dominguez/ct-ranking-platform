@@ -1,0 +1,9 @@
+streamlit==1.66.0
+SQLAlchemy==2.1.5
+psycopg[binary]==3.3.6
+bcrypt==5.0.0
+requests==2.34.2
+python-dotenv==1.2.4
+pandas==3.0.6
+plotly==7.1.0
+pillow==12.3.0
