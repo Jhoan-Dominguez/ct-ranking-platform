@@ -82,6 +82,7 @@ def main() -> None:
         if st.button("Cerrar sesión", icon="🚪", width="stretch"):
             common.logout()
             st.rerun()
+        common.enable_sidebar_hover()
 
     common.show_flashes()
     st.navigation(pages).run()

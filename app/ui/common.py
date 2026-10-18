@@ -6,6 +6,8 @@ import base64
 import hashlib
 from collections.abc import Callable
 from datetime import date, datetime
+from functools import cache
+from pathlib import Path
 from typing import Any
 
 import streamlit as st
@@ -62,6 +64,17 @@ def require_user() -> User:
 def logout() -> None:
     for key in list(st.session_state.keys()):
         del st.session_state[key]
+
+
+@cache
+def _sidebar_hover_script() -> str:
+    return (Path(__file__).with_name("sidebar_hover.js")).read_text(encoding="utf-8")
+
+
+def enable_sidebar_hover() -> None:
+    """Expande la barra lateral oculta al pasar el mouse por el borde izquierdo
+    (ver app/ui/sidebar_hover.js). Debe llamarse dentro de ``with st.sidebar``."""
+    st.html(f"<script>{_sidebar_hover_script()}</script>", unsafe_allow_javascript=True)
 
 
 # --------------------------------------------------------------------------- acciones
