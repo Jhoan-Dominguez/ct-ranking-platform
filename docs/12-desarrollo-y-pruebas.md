@@ -40,7 +40,8 @@ make format                                  # isort + ruff fix + ruff format en
 - **Ubicación y ejecución:** las pruebas están en `tests/` y usan pytest
   (`[tool.pytest.ini_options]` en `pyproject.toml`).
 - **Entorno de prueba** (`tests/conftest.py`):
-  - Fuerza `AUTH_PROVIDER=local`.
+  - Fuerza `AUTH_PROVIDER=local` y `MAIL_BACKEND=memory`: los correos quedan en
+    `mailer.OUTBOX`, y las pruebas leen de ahí los códigos.
   - Cada prueba recibe una BD **SQLite en memoria** nueva: `configure("sqlite://")` +
     `StaticPool` + `create_all`.
   - La fixture `make_user` crea usuarios con `auth.register`.
@@ -58,6 +59,7 @@ make test                                                     # todas
 | `test_academics.py` | Nota simple, ponderada y mixta; materia sin ítems; promedios ponderados por créditos y estados; CRUD de ítems con validación de escala y del 100 %; propiedad; **avance de créditos por categoría con materias repetidas**; **carga idempotente del pensum**; validación de categoría. |
 | `test_challenges.py` | Sólo un admin crea retos globales; orden del ranking y bonus del primero; visibilidad "sólo seguidores"; retos cerrados; reglas automáticas; un usuario antiguo completa al unirse. |
 | `test_social_forum_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; alias único y límites de semestre; seguir y mensajes no leídos; flujo y permisos del foro; marca de riesgo en el panel. |
+| `test_accounts_moderation.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación; bloqueos (seguimientos, mensajes, búsqueda, foro, bidireccionalidad); reportes (validaciones, duplicados, cierre por admin, conservación al borrar el contenido). |
 
 ### Pruebas de la interfaz (manuales o con `AppTest`)
 
@@ -108,6 +110,21 @@ driver.get("http://localhost:8501")
 # … iniciar sesión, ocultar el menú y mover el puntero con ActionBuilder.move_to_location(5, 400)
 # … verificar section[data-testid="stSidebar"] → data-collapsed == "false"
 ```
+
+### Pruebas de extremo a extremo con correo (Keycloak + Mailpit)
+
+Los flujos que pasan por el correo (activación, configuración del 2FA, código de eliminación) se
+probaron con Selenium contra los servicios reales:
+
+- **Leer los correos.** Mailpit expone una API: `GET http://localhost:8025/api/v1/messages` y
+  `GET /api/v1/message/{ID}`. Con ella se extraen los enlaces (`…/login-actions/action-token?key=…`)
+  y los códigos.
+- **Configurar el 2FA.** En la página de Keycloak, «Unable to scan?» muestra la clave del QR.
+  Con ella se calcula el código TOTP (RFC 6238: HMAC-SHA1, 30 s, 6 dígitos) con `hmac` de la
+  biblioteca estándar.
+- **Evitar el bloqueo por fuerza bruta.** Los intentos fallidos muy seguidos activan la
+  protección y bloquean la cuenta por un rato. Hay que dejar unos segundos entre intentos y, con
+  2FA, esperar a la siguiente ventana de 30 s antes de reutilizar un código.
 
 ## Convenciones del código
 

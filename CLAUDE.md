@@ -15,18 +15,19 @@ Always use the existing `.venv` (Python 3.13).
 
 ```bash
 make create       # .env from .env.example, install requirements-dev.txt, pre-commit install
-make up           # docker compose (PostgreSQL 16 + Keycloak 26), wait for health, create tables + base data
+make up           # docker compose (PostgreSQL 16 + Keycloak 26 + Mailpit), wait, configure Keycloak (SMTP, app URLs), create tables + base data
 make run          # streamlit run app/main.py (port APP_PORT, default 8501)
 make seed-demo    # demo users (password Demo1234) and content; idempotent
 make reset-db     # drop and recreate app tables (Keycloak users are NOT removed)
+make purge-accounts  # delete accounts whose 7-day deletion grace period expired (app + Keycloak)
 make down / make destroy   # stop containers / stop and delete volumes
-make test         # pytest; SQLite in memory + AUTH_PROVIDER=local, no Docker needed
+make test         # pytest; SQLite in memory + AUTH_PROVIDER=local + MAIL_BACKEND=memory, no Docker needed
 make lint         # pre-commit run --all-files (isort + ruff check --fix + ruff format + hygiene hooks)
 ```
 
 - To run a single test: `.venv/bin/python -m pytest tests/test_challenges.py::test_ranking_orders_by_completion_and_first_bonus`.
 - `pre-commit run --all-files` only checks git-tracked files. For untracked files, use `pre-commit run --files <paths>`.
-- Ports: Keycloak is exposed on **8180** (8080 is taken on this machine) and Postgres on 5432. Both can be changed in `.env`.
+- Ports: Keycloak is exposed on **8180** (8080 is taken on this machine), Postgres on 5432, and Mailpit on 1025 (SMTP) and 8025 (web UI, where all dev emails land). All can be changed in `.env`.
 
 ## Architecture
 
@@ -75,7 +76,12 @@ Code flows `app/views/*` (Streamlit) → `app/services/*` (business logic) → `
   - `app/ui/sidebar_hover.js` is injected once from `main.py` via `common.enable_sidebar_hover()` (`st.html` with `unsafe_allow_javascript=True`).
   - It drives Streamlit's own expand and collapse buttons (`stExpandSidebarButton`, `stSidebarCollapseButton`) and reads `section[data-testid="stSidebar"][data-collapsed]`. Re-check these selectors after upgrading Streamlit.
   - AppTest does not run JS. To test it, use a real browser: headless Firefox needs `ui.primaryPointerCapabilities=6` to report a mouse.
-- **Schema changes:** there are no migrations. Tables are created with `Base.metadata.create_all`, so changing an existing column requires `make reset-db`, or adding Alembic.
+- **Accounts, 2FA and moderation** (`docs/14-cuentas-seguridad-y-moderacion.md`):
+  - Keycloak features: email activation uses `VERIFY_EMAIL` plus `send-verify-email`. TOTP setup uses `execute-actions-email ["CONFIGURE_TOTP"]`, and the code is passed as the `otp` param of the password grant.
+  - Keycloak returns the same `invalid_grant` for a wrong password, a missing or wrong OTP, and a brute-force lock. Rapid failed attempts trigger the lock (`user_temporarily_disabled`), so space them out when testing.
+  - Deferred deletion lives in `services/accounts.py` (email code via `services/mailer.py`). Users with `deletion_scheduled_for` set only see the cancel page in `main.py`. Purge runs in a background thread (`app/jobs/purge_accounts.py`) or via `make purge-accounts`.
+  - Blocks and reports live in `services/moderation.py`. Views hide content with `moderation.hidden_user_ids(s, viewer_id)` (blocks in both directions plus pending-deletion users) through the `exclude_author_ids`, `hidden_ids`, `hidden_creator_ids` and `exclude_ids` params.
+- **Schema changes:** there is no Alembic. New tables come from `create_all`. New columns on existing tables must be added to `COLUMN_UPGRADES` in `app/db/init_db.py` (idempotent `ADD COLUMN IF NOT EXISTS`, Postgres only). Type changes or renames need `make reset-db`.
 
 ## Notes
 

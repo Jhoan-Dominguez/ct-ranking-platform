@@ -16,6 +16,7 @@ make create && make up && make seed-demo && make run
   ejemplo `ana.martinez` (último semestre) o `diego.lopez` (primer semestre), con la contraseña
   `Demo1234`.
 - Keycloak: http://localhost:8180 (`admin` / `admin`).
+- Correos de desarrollo (Mailpit): http://localhost:8025.
 
 - Documentación técnica completa: [`docs/`](docs/README.md).
 - Resumen de lo construido y de lo agregado al enunciado: [PROYECTO.md](PROYECTO.md).

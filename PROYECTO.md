@@ -168,8 +168,30 @@ intercambiables con `AUTH_PROVIDER`:
   - El resultado se puede exportar a **CSV**.
 - **Contenido:** ver todas las publicaciones, comentarios, retos y mensajes, y eliminarlos
   (moderación).
+- **Reportes:** revisar los reportes de los estudiantes y resolverlos, descartarlos, eliminar el
+  contenido reportado o deshabilitar al usuario.
 - **Usuarios:** cambiar el rol y habilitar o deshabilitar cuentas. Con Keycloak, el cambio de
-  estado también se aplica allá.
+  estado también se aplica allá. También se ve si el correo está verificado y si la cuenta tiene
+  eliminación programada (y se puede cancelar).
+
+### Cuentas, seguridad y moderación
+- **Activación por correo:** al registrarse, Keycloak envía un enlace. Hasta abrirlo no se puede
+  iniciar sesión, y desde el login se puede reenviar.
+- **Verificación en dos pasos (2FA con QR):** nativa de Keycloak, sin servicios externos.
+  - Se activa desde Mi perfil: llega un enlace por correo a la página de Keycloak con el QR para
+    Google Authenticator, Microsoft Authenticator o FreeOTP.
+  - Luego el login pide el código.
+- **Eliminar la cuenta:**
+  - Requiere la contraseña (+ código 2FA) y un código de 6 dígitos enviado al correo.
+  - La cuenta queda **desactivada y oculta 7 días**: al iniciar sesión sólo se puede cancelar.
+  - Al vencer el plazo, se borra de la app y de Keycloak.
+- **Bloquear y reportar** usuarios, publicaciones y comentarios. Los reportes llegan al panel de
+  administrador.
+- **Correo:**
+  - En desarrollo, **Mailpit** atrapa todos los correos y los muestra en
+    http://localhost:8025.
+  - En producción se usa un SMTP real.
+- Detalle completo en [`docs/14-cuentas-seguridad-y-moderacion.md`](docs/14-cuentas-seguridad-y-moderacion.md).
 
 ### Inicio (🏠)
 - Promedios, puntos y posición en el ranking.
@@ -193,6 +215,8 @@ intercambiables con `AUTH_PROVIDER`:
 - Menú lateral que, estando oculto, **se expande al pasar el mouse** por el borde izquierdo y se
   vuelve a ocultar al salir de él.
 - Plantillas de mensajes de apoyo y contador de no leídos.
+- **Activación de cuentas por correo**, **2FA con QR**, **eliminación diferida de cuentas** con
+  doble verificación, y **reportes y bloqueos** con gestión desde el panel de administrador.
 - Proveedor de autenticación **local** alternativo a Keycloak.
 - **Datos de demostración** (`make seed-demo`). Ocho estudiantes de Ingeniería de Software en
   distintos niveles: recién ingresados (semestre 1), iniciando (2–3), a mitad de carrera (5–6) y
@@ -206,7 +230,7 @@ Requisitos: Docker con Docker Compose, Python 3.12+ y `make`.
 
 ```bash
 make create      # .env, dependencias en .venv y hooks de pre-commit
-make up          # PostgreSQL + Keycloak, espera a que estén listos y crea las tablas
+make up          # PostgreSQL + Keycloak + Mailpit, configura Keycloak y crea las tablas
 make seed-demo   # (opcional) usuarios y datos de ejemplo
 make run         # http://localhost:8501
 make down        # detiene los contenedores (conserva datos)
@@ -219,6 +243,7 @@ make down        # detiene los contenedores (conserva datos)
 | App, administrador | `admin` / `Admin123!` (configurable en `.env`) |
 | App, usuarios demo | `diego.lopez`, `valentina.rios` (sem. 1), `carlos.ruiz` (2), `sofia.herrera` (3), `laura.gomez` (5), `mateo.castro` (6), `juan.perez` (8), `ana.martinez` (9) / `Demo1234` |
 | Consola de Keycloak | http://localhost:8180 → `admin` / `admin` |
+| Correos (Mailpit) | http://localhost:8025 |
 
 **Otros comandos** (`make help`):
 
@@ -231,6 +256,7 @@ make down        # detiene los contenedores (conserva datos)
 | `make lint` | Ejecuta pre-commit (isort, ruff y chequeos básicos) sobre todo el repo. |
 | `make format` | Ordena imports y formatea el código. |
 | `make reset-db` | Recrea las tablas de la app. |
+| `make purge-accounts` | Borra definitivamente las cuentas cuyo plazo de eliminación venció. |
 | `make destroy` | Baja todo y **borra los volúmenes**. |
 
 > Si el puerto 8180 o el 5432 están ocupados, cambia `KEYCLOAK_PORT` y `KEYCLOAK_URL`, o
@@ -245,9 +271,11 @@ make down        # detiene los contenedores (conserva datos)
 
 - La sesión vive en `st.session_state`: al recargar el navegador hay que volver a iniciar sesión.
   Una mejora sería usar el flujo *Authorization Code* de Keycloak con `st.login` (OIDC) y cookies.
-- El esquema se crea con `create_all` y no hay migraciones. Para evolucionarlo en producción
-  conviene usar **Alembic**. Por ejemplo, para agregar la columna `subjects.category` hubo que
-  ejecutar `make reset-db`.
+- El esquema se crea con `create_all`. Las columnas nuevas se agregan con sentencias
+  idempotentes (`COLUMN_UPGRADES` en `init_db`). Para cambios más complejos en producción
+  conviene usar **Alembic**.
+- El 2FA y la activación por correo sólo funcionan con `AUTH_PROVIDER=keycloak`. El proveedor
+  local no los tiene.
 - El pensum no indica créditos. Los créditos y categorías se asignaron como estimación en
   `app/data/pensums.py`.
 - La evidencia de retos manuales es auto-declarada. Se podría agregar la validación del creador

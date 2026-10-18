@@ -20,6 +20,14 @@
 | El menú lateral oculto no se abre al pasar el mouse | Pantalla táctil o navegador que no reporta un puntero con hover (el script sólo se activa con mouse). También puede pasar tras actualizar Streamlit, si cambiaron los `data-testid` de los botones del menú. | Usa el botón «>>». Tras una actualización de Streamlit, revisa los selectores en `app/ui/sidebar_hover.js` (ver [Páginas y vistas](09-paginas-y-vistas.md#menú-lateral-expandir-al-pasar-el-mouse)). |
 | «Expandir todo» no abre una materia recién creada | La materia aún no existía cuando se pulsó el botón. | Pulsa de nuevo «Expandir todo». El estado se guarda por materia. |
 | `pre-commit run --all-files` no revisa mis archivos nuevos | Sólo revisa los archivos versionados. | `git add` primero, o `pre-commit run --files <rutas>`. |
+| No llegan los correos (activación, 2FA, código de eliminación) | Mailpit no está levantado, el SMTP no está configurado en Keycloak o falla el SMTP real. | En desarrollo abre http://localhost:8025. Ejecuta `make up`, que reconfigura el SMTP de Keycloak. Con un SMTP real, revisa `SMTP_*` y `KEYCLOAK_SMTP_*`. |
+| «No fue posible enviar el correo…» | La app no pudo conectarse al SMTP (`SMTP_HOST:SMTP_PORT`). | `make ps` (contenedor `mailpit`) o revisa las credenciales del SMTP real. |
+| «Tu cuenta aún no está activada» | No se abrió el enlace de verificación. | Abre el correo «Verificación de email» o usa **Reenviar correo de activación**. |
+| El enlace de activación o de 2FA dice que expiró | El enlace tiene vigencia limitada (el de 2FA dura 12 horas). | Pide uno nuevo desde la app. |
+| «Usuario, contraseña o código de verificación incorrectos» con la contraseña correcta | La cuenta tiene 2FA y falta el código, o el código expiró o ya se usó. | Escribe el código actual de la app autenticadora. Si acabas de usarlo, espera al siguiente. |
+| «Demasiados intentos fallidos…» | Protección contra fuerza bruta de Keycloak. | Espera un minuto. Un admin puede desbloquear en la consola de Keycloak (*Users → usuario*). |
+| Perdí el celular con el 2FA | La credencial OTP sigue activa. | Un admin la elimina en la consola de Keycloak (*Users → usuario → Credentials → OTP → Delete*). |
+| La cuenta no se borró al pasar los 7 días | La app no estaba en ejecución, y el hilo de purga sólo corre mientras lo está. | `make purge-accounts`, o prográmalo con cron. |
 | Aviso `missing ScriptRunContext` al ejecutar scripts o pruebas | Se importó Streamlit fuera de `streamlit run` (por ejemplo, con `AppTest`). | Se puede ignorar. |
 
 ## Comandos de diagnóstico
