@@ -1,7 +1,8 @@
 import os
 
-# Los tests usan autenticación local y SQLite en memoria: no requieren Docker.
+# Los tests usan autenticación local, SQLite en memoria y correo en memoria: no requieren Docker.
 os.environ["AUTH_PROVIDER"] = "local"
+os.environ["MAIL_BACKEND"] = "memory"  # los correos se guardan en mailer.OUTBOX
 
 import pytest
 from sqlalchemy import event
