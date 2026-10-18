@@ -71,29 +71,46 @@ def _google_claims(**overrides):
     return claims | overrides
 
 
-def test_login_with_google_creates_and_links_user(session):
-    user = auth.login_with_oidc(session, _google_claims())
+def test_google_signup_creates_and_then_logs_in(session):
+    user, created = auth.login_with_oidc(session, _google_claims(), allow_create=True)
+    assert created
     assert (user.username, user.email, user.keycloak_id) == (
         "eva.gomez",
         "eva.gomez@estudiantes.areandina.edu.co",
         "kc-123",
     )
     assert user.email_verified and user.full_name == "Eva Gómez" and user.last_login
-    again = auth.login_with_oidc(session, _google_claims(given_name="Otro"))
-    assert again.id == user.id  # misma identidad de Keycloak → mismo usuario
+    # Una vez creada, «Iniciar sesión con Google» entra a la misma cuenta.
+    again, created = auth.login_with_oidc(session, _google_claims(given_name="Otro"))
+    assert again.id == user.id and not created
+    # «Crear cuenta con Google» con una cuenta existente sólo inicia sesión.
+    _, created = auth.login_with_oidc(session, _google_claims(), allow_create=True)
+    assert not created
+
+
+def test_google_login_requires_an_existing_account(session):
+    with pytest.raises(auth.AccountNotFoundError, match="Créala primero"):
+        auth.login_with_oidc(session, _google_claims())
+
+
+def test_google_login_finds_account_registered_with_the_form(session, make_user):
+    """Una cuenta creada con el formulario se reconoce por su correo y queda vinculada."""
+    user = make_user(email="eva.gomez@estudiantes.areandina.edu.co")
+    linked, created = auth.login_with_oidc(session, _google_claims())
+    assert linked.id == user.id and not created and linked.keycloak_id == "kc-123"
 
 
 def test_login_with_google_rejects_other_domains_and_unverified(session):
     with pytest.raises(auth.AuthError, match="institucional"):
-        auth.login_with_oidc(session, _google_claims(email="eva@gmail.com"))
+        auth.login_with_oidc(session, _google_claims(email="eva@gmail.com"), allow_create=True)
     with pytest.raises(auth.AuthError, match="confirmó"):
-        auth.login_with_oidc(session, _google_claims(email_verified=False))
+        auth.login_with_oidc(session, _google_claims(email_verified=False), allow_create=True)
     with pytest.raises(auth.AuthError):
-        auth.login_with_oidc(session, _google_claims(sub=None))
+        auth.login_with_oidc(session, _google_claims(sub=None), allow_create=True)
 
 
 def test_login_with_google_respects_disabled_accounts(session):
-    user = auth.login_with_oidc(session, _google_claims())
+    user, _ = auth.login_with_oidc(session, _google_claims(), allow_create=True)
     auth.set_active(session, user, False)
     with pytest.raises(auth.AuthError, match="deshabilitada"):
         auth.login_with_oidc(session, _google_claims())
