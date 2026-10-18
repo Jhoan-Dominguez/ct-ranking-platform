@@ -31,6 +31,17 @@ class Settings:
     grade_min: float
     grade_max: float
     grade_passing: float
+    app_url: str
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_password: str
+    smtp_starttls: bool
+    mail_from: str
+    mail_from_name: str
+    # "smtp" envía correos reales; "memory" los guarda en memoria (pruebas).
+    mail_backend: str
+    account_deletion_days: int
 
 
 def _database_url() -> str:
@@ -59,4 +70,14 @@ def get_settings() -> Settings:
         grade_min=_float("GRADE_MIN", 0.0),
         grade_max=_float("GRADE_MAX", 5.0),
         grade_passing=_float("GRADE_PASSING", 3.0),
+        app_url=os.getenv("APP_URL", "http://localhost:8501").rstrip("/"),
+        smtp_host=os.getenv("SMTP_HOST", "localhost"),
+        smtp_port=int(os.getenv("SMTP_PORT", "1025")),
+        smtp_user=os.getenv("SMTP_USER", ""),
+        smtp_password=os.getenv("SMTP_PASSWORD", ""),
+        smtp_starttls=os.getenv("SMTP_STARTTLS", "false").lower() == "true",
+        mail_from=os.getenv("MAIL_FROM", "no-reply@ctranking.local"),
+        mail_from_name=os.getenv("MAIL_FROM_NAME", "CT Ranking"),
+        mail_backend=os.getenv("MAIL_BACKEND", "smtp").lower(),
+        account_deletion_days=int(os.getenv("ACCOUNT_DELETION_DAYS", "7")),
     )

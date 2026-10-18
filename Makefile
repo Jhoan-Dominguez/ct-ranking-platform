@@ -6,11 +6,11 @@ APP_PORT    ?= $(shell grep -E '^APP_PORT=' .env 2>/dev/null | cut -d= -f2 || ec
 
 .DEFAULT_GOAL := help
 .PHONY: help create env install up down restart logs ps init-db seed-demo reset-db run dev \
-        test lint format clean destroy
+        purge-accounts test lint format clean destroy
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 # ---------------------------------------------------------------- crear
 
@@ -28,9 +28,10 @@ install: ## Instala dependencias en el entorno virtual
 
 # ---------------------------------------------------------------- subir / bajar
 
-up: env ## Levanta PostgreSQL y Keycloak, espera a que estén listos e inicializa la BD
+up: env ## Levanta PostgreSQL, Keycloak y Mailpit; configura Keycloak e inicializa la BD
 	$(COMPOSE) up -d
 	$(PYTHON) scripts/wait_for_services.py
+	$(PYTHON) scripts/configure_keycloak.py
 	$(PYTHON) -m app.db.init_db
 
 down: ## Detiene y elimina los contenedores (conserva los datos)
@@ -59,6 +60,9 @@ seed-demo: ## Carga usuarios y datos de demostración
 
 reset-db: ## Borra y recrea todas las tablas de la app (¡pierde los datos!)
 	$(PYTHON) -m app.db.init_db --reset
+
+purge-accounts: ## Elimina definitivamente las cuentas cuyo plazo de eliminación venció
+	$(PYTHON) -m app.jobs.purge_accounts
 
 # ---------------------------------------------------------------- calidad
 

@@ -45,6 +45,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  # Servidor SMTP de desarrollo: atrapa todos los correos (de Keycloak y de la app) y los muestra
+  # en http://localhost:8025 sin enviarlos realmente. En producción se usa un SMTP real (.env).
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "${SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
 
 volumes:
   pgdata:
