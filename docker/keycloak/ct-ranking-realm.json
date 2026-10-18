@@ -1,0 +1,52 @@
+{
+  "realm": "ct-ranking",
+  "displayName": "CT Ranking",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "roles": {
+    "realm": [
+      { "name": "student", "description": "Estudiante de la plataforma" },
+      { "name": "admin", "description": "Administrador de la plataforma" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ct-ranking-app",
+      "name": "CT Ranking (Streamlit)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-ct-ranking-app",
+      "enabled": true,
+      "serviceAccountClientId": "ct-ranking-app",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users"]
+      }
+    },
+    {
+      "username": "${APP_ADMIN_USERNAME}",
+      "email": "${APP_ADMIN_EMAIL}",
+      "firstName": "Administrador",
+      "lastName": "CT",
+      "enabled": true,
+      "emailVerified": true,
+      "realmRoles": ["admin", "student"],
+      "credentials": [
+        { "type": "password", "value": "${APP_ADMIN_PASSWORD}", "temporary": false }
+      ]
+    }
+  ]
+}
