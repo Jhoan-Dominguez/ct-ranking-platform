@@ -1,6 +1,9 @@
+"""Autenticación: registro, login, contraseñas, dominio institucional y Google."""
+
 import pytest
 
-from app.services import admin, auth, forum, social, users
+from app import auth
+from app.auth import service as auth_service
 
 
 def test_register_and_login_local(session, make_user):
@@ -32,60 +35,6 @@ def test_disabled_user_cannot_login(session, make_user):
         auth.login(session, user.username, "Clave1234")
 
 
-def test_profile_alias_unique_and_semester_bounds(session, make_user):
-    a, b = make_user(), make_user()
-    users.update_profile(session, a, alias="Lau")
-    with pytest.raises(users.ProfileError, match="alias"):
-        users.update_profile(session, b, alias="lau")
-    with pytest.raises(users.ProfileError, match="semestre"):
-        users.update_profile(session, a, current_semester=12, total_semesters=10)
-
-
-def test_follow_and_support_messages(session, make_user):
-    a, b = make_user(), make_user()
-    social.follow(session, a.id, b.id)
-    social.follow(session, a.id, b.id)  # idempotente
-    assert social.follow_counts(session, b.id) == (1, 0)
-    with pytest.raises(social.SocialError):
-        social.follow(session, a.id, a.id)
-
-    social.send_support(session, a.id, b.id, "¡Vamos, tú puedes!")
-    assert social.unread_count(session, b.id) == 1
-    social.mark_all_read(session, b.id)
-    assert social.unread_count(session, b.id) == 0
-    social.unfollow(session, a.id, b.id)
-    assert social.follow_counts(session, b.id) == (0, 0)
-
-
-def test_forum_flow_and_permissions(session, make_user):
-    author, other = make_user(), make_user()
-    post = forum.create_post(
-        session, author.id, title="Duda de álgebra", body="¿Cómo?", category="Duda académica"
-    )
-    forum.add_comment(session, post.id, other.id, "Así se hace")
-    assert forum.toggle_like(session, post.id, other.id) is True
-    rows = forum.list_posts(session, search="álgebra")
-    assert (rows[0].comments, rows[0].likes) == (1, 1)
-
-    with pytest.raises(forum.ForumError):
-        forum.delete_post(session, other, post.id)
-    forum.set_solved(session, author, post.id, True)
-    assert forum.list_posts(session, solved=True)[0].post.id == post.id
-
-
-def test_admin_students_frame_flags_risk(session, make_user):
-    from app.services import academics
-
-    user = make_user()
-    subj = academics.add_subject(session, user.id, name="Física", semester=1)
-    academics.add_item(session, user.id, subj.id, name="Parcial", grade=2.0)
-    df = admin.students_frame(session)
-    row = df[df["id"] == user.id].iloc[0]
-    assert row["promedio_general"] == pytest.approx(2.0)
-    assert bool(row["en_riesgo"]) is True
-    assert admin.global_metrics(session).users == 1
-
-
 def test_students_must_use_institutional_domain(session, make_user):
     assert auth.student_email(" Laura.Gomez ") == "laura.gomez@estudiantes.areandina.edu.co"
     for bad in ("laura@gmail.com", "laura gomez", ".laura", "laura..gomez", ""):
@@ -103,7 +52,7 @@ def test_students_must_use_institutional_domain(session, make_user):
 
 
 def test_admins_are_exempt_from_student_domain(session, make_user):
-    from app.db.models import Role
+    from app.database.models import Role
 
     admin = make_user(email="soporte@ctranking.local", role=Role.ADMIN)
     auth.change_email(session, admin, "admin2@ctranking.local")
@@ -153,5 +102,5 @@ def test_login_with_google_respects_disabled_accounts(session):
 def test_first_keycloak_login_creates_active_user(session):
     """Regresión: un usuario nuevo tenía is_active=None antes del flush y se rechazaba."""
     identity = auth.Identity(external_id="kc-new", username="nuevo", email="n@x.co")
-    user = auth._sync_keycloak_user(session, identity)
+    user = auth_service._sync_keycloak_user(session, identity)
     assert user.id is not None and user.is_active is True and user.role == "student"

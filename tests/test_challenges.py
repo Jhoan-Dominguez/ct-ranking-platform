@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.db.models import ChallengeKind, Role, Visibility
+from app.database.models import ChallengeKind, Role, Visibility
 from app.services import challenges, forum, social
 
 

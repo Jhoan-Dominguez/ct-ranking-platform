@@ -8,10 +8,10 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 
-from app.config import get_settings
-from app.db import session as db_session
-from app.db.models import Base
-from app.services import auth
+from app import auth
+from app.core.config import get_settings
+from app.database import session as db_session
+from app.database.models import Base
 
 get_settings.cache_clear()
 

@@ -1,7 +1,7 @@
 import pytest
 
-from app.data.pensums import SOFTWARE_ENGINEERING
-from app.db.models import GradeItem, Subject, SubjectCategory, SubjectStatus
+from app.database.models import GradeItem, Subject, SubjectCategory, SubjectStatus
+from app.database.seeds.pensums import SOFTWARE_ENGINEERING
 from app.services import academics
 
 
