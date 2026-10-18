@@ -18,4 +18,15 @@ class EmailNotVerifiedError(AuthError):
         self.login = login
 
 
+class AccountNotFoundError(AuthError):
+    """Inicio de sesión con Google de alguien que aún no tiene cuenta en la plataforma."""
+
+    def __init__(self, email: str) -> None:
+        super().__init__(
+            f"No existe una cuenta en CT Ranking para {email}. Créala primero en la pestaña "
+            "«Crear cuenta» (puedes usar «Crear cuenta con Google»)."
+        )
+        self.email = email
+
+
 INVALID_LOGIN = "Usuario, contraseña o código de verificación incorrectos."

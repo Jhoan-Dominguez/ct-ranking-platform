@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.errors import INVALID_LOGIN, AuthError
+from app.auth.errors import INVALID_LOGIN, AccountNotFoundError, AuthError
 from app.auth.keycloak import Identity, KeycloakClient
 from app.auth.passwords import check_password, hash_password
 from app.auth.validation import (
@@ -174,30 +174,52 @@ def google_login_enabled() -> bool:
     return _uses_keycloak() and bool(get_settings().google_client_id)
 
 
-def login_with_oidc(session: Session, claims: Mapping[str, object]) -> User:
-    """Inicia sesión con los datos del token OIDC de Keycloak (``st.user``) tras volver de
-    Google. Keycloak ya restringe las cuentas al dominio institucional (``hostedDomain``); aquí se
-    vuelve a validar como segunda capa."""
+def login_with_oidc(
+    session: Session, claims: Mapping[str, object], *, allow_create: bool = False
+) -> tuple[User, bool]:
+    """Inicia sesión (o crea la cuenta) con los datos del token OIDC de Keycloak (``st.user``)
+    tras volver de Google. Devuelve ``(usuario, creado)``.
+
+    - ``allow_create=False`` («Iniciar sesión con Google»): la cuenta debe existir en la
+      plataforma, buscada por su identificador de Keycloak o por su correo. Si no existe, lanza
+      ``AccountNotFoundError`` y borra el usuario que Keycloak creó automáticamente al volver de
+      Google, para no dejar cuentas huérfanas.
+    - ``allow_create=True`` («Crear cuenta con Google»): crea la cuenta si no existe. Si ya
+      existía, simplemente inicia sesión.
+
+    Keycloak ya restringe las cuentas al dominio institucional (``hostedDomain``); aquí se vuelve
+    a validar como segunda capa."""
     email = str(claims.get("email") or "").strip().lower()
     if not claims.get("sub") or not email:
         raise AuthError("La respuesta de inicio de sesión no incluye un correo.")
     if not claims.get("email_verified"):
         raise AuthError("Google no confirmó tu correo electrónico.")
     validate_student_email(email)
+    external_id = str(claims["sub"])
+    existing = session.scalar(
+        select(User).where(or_(User.keycloak_id == external_id, func.lower(User.email) == email))
+    )
+    if existing is None and not allow_create:
+        if _uses_keycloak():
+            with contextlib.suppress(AuthError):
+                KeycloakClient().delete_broker_only_user(external_id)
+        raise AccountNotFoundError(email)
     identity = Identity(
-        external_id=str(claims["sub"]),
+        external_id=external_id,
         username=str(claims.get("preferred_username") or email.split("@", 1)[0]),
         email=email,
         first_name=str(claims.get("given_name") or ""),
         last_name=str(claims.get("family_name") or ""),
         email_verified=True,
     )
+    if existing is not None:
+        existing.keycloak_id = existing.keycloak_id or external_id
     user = _sync_keycloak_user(session, identity)
     if not user.is_active:
         raise AuthError("La cuenta está deshabilitada. Contacta al administrador.")
     user.last_login = datetime.now(UTC)
     session.flush()
-    return user
+    return user, existing is None
 
 
 def resend_verification(login: str) -> None:

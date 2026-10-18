@@ -12,7 +12,12 @@ Este paquete reexporta la API pública para usarla como ``from app import auth``
 ``auth.login(...)``.
 """
 
-from app.auth.errors import INVALID_LOGIN, AuthError, EmailNotVerifiedError
+from app.auth.errors import (
+    INVALID_LOGIN,
+    AccountNotFoundError,
+    AuthError,
+    EmailNotVerifiedError,
+)
 from app.auth.keycloak import Identity, KeycloakClient
 from app.auth.passwords import check_password, hash_password
 from app.auth.service import (
@@ -46,6 +51,7 @@ from app.auth.validation import (
 __all__ = [
     "INVALID_LOGIN",
     "TOTP_SETUP_LINK_HOURS",
+    "AccountNotFoundError",
     "AuthError",
     "EmailNotVerifiedError",
     "Identity",

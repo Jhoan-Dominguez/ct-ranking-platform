@@ -165,6 +165,18 @@ class KeycloakClient:
     def delete_credential(self, user_id: str, credential_id: str) -> None:
         self._request("DELETE", f"/users/{user_id}/credentials/{credential_id}").raise_for_status()
 
+    def delete_broker_only_user(self, user_id: str) -> bool:
+        """Borra un usuario creado automáticamente por Keycloak al volver de Google (sólo tiene
+        identidad federada y no tiene contraseña). Devuelve True si lo borró."""
+        federated = self._request("GET", f"/users/{user_id}/federated-identity")
+        if federated.status_code == 404 or not federated.json():
+            return False
+        credentials = self._request("GET", f"/users/{user_id}/credentials")
+        if any(c.get("type") == "password" for c in credentials.json()):
+            return False
+        self.delete_user(user_id)
+        return True
+
     def delete_user(self, user_id: str) -> None:
         resp = self._request("DELETE", f"/users/{user_id}")
         if resp.status_code not in (204, 404):
