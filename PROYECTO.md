@@ -257,6 +257,7 @@ make down        # detiene los contenedores (conserva datos)
 | `make format` | Ordena imports y formatea el código. |
 | `make reset-db` | Recrea las tablas de la app. |
 | `make purge-accounts` | Borra definitivamente las cuentas cuyo plazo de eliminación venció. |
+| `make migrate-emails` | Pasa el correo de los estudiantes al dominio institucional (`ARGS=--dry-run` para simular). |
 | `make destroy` | Baja todo y **borra los volúmenes**. |
 
 > Si el puerto 8180 o el 5432 están ocupados, cambia `KEYCLOAK_PORT` y `KEYCLOAK_URL`, o

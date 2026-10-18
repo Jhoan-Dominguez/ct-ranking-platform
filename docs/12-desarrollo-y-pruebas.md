@@ -58,7 +58,7 @@ make test                                                     # todas
 |---------|-------|
 | `test_academics.py` | Nota simple, ponderada y mixta; materia sin ítems; promedios ponderados por créditos y estados; CRUD de ítems con validación de escala y del 100 %; propiedad; **avance de créditos por categoría con materias repetidas**; **carga idempotente del pensum**; validación de categoría. |
 | `test_challenges.py` | Sólo un admin crea retos globales; orden del ranking y bonus del primero; visibilidad "sólo seguidores"; retos cerrados; reglas automáticas; un usuario antiguo completa al unirse. |
-| `test_social_forum_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; alias único y límites de semestre; seguir y mensajes no leídos; flujo y permisos del foro; marca de riesgo en el panel. |
+| `test_social_forum_auth.py` | Registro y login local (usuario o correo); reglas y cambio de contraseña; cuenta deshabilitada; alias único y límites de semestre; seguir y mensajes no leídos; flujo y permisos del foro; marca de riesgo en el panel.; dominio institucional obligatorio para estudiantes y exención de administradores. |
 | `test_accounts_moderation.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación; bloqueos (seguimientos, mensajes, búsqueda, foro, bidireccionalidad); reportes (validaciones, duplicados, cierre por admin, conservación al borrar el contenido). |
 
 ### Pruebas de la interfaz (manuales o con `AppTest`)

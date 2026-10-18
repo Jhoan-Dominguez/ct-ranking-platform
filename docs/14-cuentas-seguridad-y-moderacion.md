@@ -37,6 +37,23 @@ proveedor. Por ejemplo, Gmail con contraseña de aplicación: `smtp.gmail.com:58
 `MAIL_BACKEND=memory` guarda los correos en `mailer.OUTBOX` en lugar de enviarlos. Lo usan las
 pruebas.
 
+## Correo institucional obligatorio
+
+Los estudiantes deben usar el correo de **`@estudiantes.areandina.edu.co`** (configurable con
+`STUDENT_EMAIL_DOMAIN`):
+
+- **En el formulario** de registro y en *Mi perfil → Cuenta y seguridad* sólo se escribe la
+  parte antes de la @. El dominio se muestra fijo al lado. Si se escribe una @ o caracteres no
+  válidos, aparece un error.
+- **En el servicio**, `auth.register` y `auth.change_email` rechazan cualquier otro dominio
+  (incluidos otros subdominios como `@areandina.edu.co`). Así la regla no se puede saltar
+  aunque se llame al servicio desde otro lugar.
+- **Administradores:** están exentos. El admin conserva `APP_ADMIN_EMAIL`.
+- **Usuarios existentes:** `make migrate-emails` cambia su correo a
+  `<usuario>@estudiantes.areandina.edu.co` en la app y en Keycloak. `ARGS=--dry-run` muestra los
+  cambios sin aplicarlos. Es idempotente.
+- **Pruebas y datos demo:** usan ese dominio.
+
 ## Activación de la cuenta por correo
 
 ```mermaid

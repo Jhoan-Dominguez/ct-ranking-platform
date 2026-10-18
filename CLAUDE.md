@@ -20,6 +20,7 @@ make run          # streamlit run app/main.py (port APP_PORT, default 8501)
 make seed-demo    # demo users (password Demo1234) and content; idempotent
 make reset-db     # drop and recreate app tables (Keycloak users are NOT removed)
 make purge-accounts  # delete accounts whose 7-day deletion grace period expired (app + Keycloak)
+make migrate-emails  # move existing students' emails to STUDENT_EMAIL_DOMAIN (ARGS=--dry-run to preview)
 make down / make destroy   # stop containers / stop and delete volumes
 make test         # pytest; SQLite in memory + AUTH_PROVIDER=local + MAIL_BACKEND=memory, no Docker needed
 make lint         # pre-commit run --all-files (isort + ruff check --fix + ruff format + hygiene hooks)

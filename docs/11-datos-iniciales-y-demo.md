@@ -88,7 +88,7 @@ prefijo de código distinto, adaptando `_semester`.
 - Las cuentas demo se crean **ya activadas** (`require_verification=False`): no necesitan el
   enlace del correo.
 - Todos los usuarios demo tienen la contraseña **`Demo1234`** y el correo
-  `<usuario>@demo.edu.co`. Con Keycloak se crean también en el realm. Si ya existían en Keycloak
+  `<usuario>@estudiantes.areandina.edu.co` (dominio institucional). Con Keycloak se crean también en el realm. Si ya existían en Keycloak
   (por ejemplo, tras `make reset-db`), sólo se crea la fila local, que se vincula en el primer
   login.
 
