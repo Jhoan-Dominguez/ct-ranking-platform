@@ -108,3 +108,50 @@ def test_admins_are_exempt_from_student_domain(session, make_user):
     admin = make_user(email="soporte@ctranking.local", role=Role.ADMIN)
     auth.change_email(session, admin, "admin2@ctranking.local")
     assert admin.email == "admin2@ctranking.local"
+
+
+def _google_claims(**overrides):
+    claims = {
+        "sub": "kc-123",
+        "email": "eva.gomez@estudiantes.areandina.edu.co",
+        "email_verified": True,
+        "preferred_username": "eva.gomez",
+        "given_name": "Eva",
+        "family_name": "Gómez",
+    }
+    return claims | overrides
+
+
+def test_login_with_google_creates_and_links_user(session):
+    user = auth.login_with_oidc(session, _google_claims())
+    assert (user.username, user.email, user.keycloak_id) == (
+        "eva.gomez",
+        "eva.gomez@estudiantes.areandina.edu.co",
+        "kc-123",
+    )
+    assert user.email_verified and user.full_name == "Eva Gómez" and user.last_login
+    again = auth.login_with_oidc(session, _google_claims(given_name="Otro"))
+    assert again.id == user.id  # misma identidad de Keycloak → mismo usuario
+
+
+def test_login_with_google_rejects_other_domains_and_unverified(session):
+    with pytest.raises(auth.AuthError, match="institucional"):
+        auth.login_with_oidc(session, _google_claims(email="eva@gmail.com"))
+    with pytest.raises(auth.AuthError, match="confirmó"):
+        auth.login_with_oidc(session, _google_claims(email_verified=False))
+    with pytest.raises(auth.AuthError):
+        auth.login_with_oidc(session, _google_claims(sub=None))
+
+
+def test_login_with_google_respects_disabled_accounts(session):
+    user = auth.login_with_oidc(session, _google_claims())
+    auth.set_active(session, user, False)
+    with pytest.raises(auth.AuthError, match="deshabilitada"):
+        auth.login_with_oidc(session, _google_claims())
+
+
+def test_first_keycloak_login_creates_active_user(session):
+    """Regresión: un usuario nuevo tenía is_active=None antes del flush y se rechazaba."""
+    identity = auth.Identity(external_id="kc-new", username="nuevo", email="n@x.co")
+    user = auth._sync_keycloak_user(session, identity)
+    assert user.id is not None and user.is_active is True and user.role == "student"
