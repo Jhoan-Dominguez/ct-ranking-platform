@@ -73,7 +73,7 @@ def _register_tab() -> None:
         first_name = c1.text_input("Nombre")
         last_name = c2.text_input("Apellido")
         new_username = st.text_input("Usuario", help="3 a 30 caracteres: letras, números, . - _")
-        email = st.text_input("Correo")
+        email_local = common.institutional_email_input("Correo institucional")
         c3, c4 = st.columns(2)
         pwd = c3.text_input("Contraseña", type="password", help="Mín. 8 con letras y números")
         pwd2 = c4.text_input("Repite la contraseña", type="password")
@@ -82,6 +82,7 @@ def _register_tab() -> None:
                 st.error("Las contraseñas no coinciden.")
                 return
             try:
+                email = auth.student_email(email_local)
                 with session_scope() as s:
                     user = auth.register(
                         s,

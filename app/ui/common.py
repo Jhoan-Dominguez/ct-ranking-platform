@@ -83,6 +83,19 @@ def enable_sidebar_hover() -> None:
     st.html(f"<script>{_sidebar_hover_script()}</script>", unsafe_allow_javascript=True)
 
 
+def institutional_email_input(label: str, value: str = "", key: str | None = None) -> str:
+    """Campo para la parte del correo antes de la @: el dominio institucional es fijo.
+    Devuelve sólo la parte local (``auth.student_email`` arma y valida el correo completo)."""
+    domain = auth.student_domain()
+    local_value = value.split("@", 1)[0] if value.endswith("@" + domain) else ""
+    left, right = st.columns([3, 2], vertical_alignment="bottom")
+    local = left.text_input(
+        label, local_value, key=key, placeholder="nombre.apellido", help=f"Tu correo @{domain}"
+    )
+    right.markdown(f"**@{domain}**")
+    return local
+
+
 # --------------------------------------------------------------------------- acciones
 
 

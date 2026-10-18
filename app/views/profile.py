@@ -24,11 +24,17 @@ def _otp_input(two_factor: bool, key: str) -> str:
 def _security_tab(user, two_factor: bool) -> None:
     st.text_input("Usuario", user.username, disabled=True)
     with st.form("email"):
-        email = st.text_input("Correo electrónico", user.email)
+        if user.is_admin:
+            email_value = st.text_input("Correo electrónico", user.email)
+        else:
+            email_value = common.institutional_email_input("Correo institucional", user.email)
         if st.form_submit_button("Actualizar correo"):
-            common.run_action(
-                lambda s: auth.change_email(s, s.merge(user), email), "Correo actualizado"
-            )
+
+            def _change(s):
+                email = email_value if user.is_admin else auth.student_email(email_value)
+                auth.change_email(s, s.merge(user), email)
+
+            common.run_action(_change, "Correo actualizado")
     with st.form("password", clear_on_submit=True):
         st.markdown("**Cambiar contraseña**")
         current_pwd = st.text_input("Contraseña actual", type="password")
