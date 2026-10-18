@@ -48,6 +48,20 @@ class SubjectCategory(StrEnum):
     LANGUAGES = "idiomas"
 
 
+class ReportReason(StrEnum):
+    SPAM = "spam"
+    HARASSMENT = "acoso"
+    INAPPROPRIATE = "contenido_inapropiado"
+    IMPERSONATION = "suplantacion"
+    OTHER = "otro"
+
+
+class ReportStatus(StrEnum):
+    PENDING = "pendiente"
+    RESOLVED = "resuelto"
+    DISMISSED = "descartado"
+
+
 class ChallengeKind(StrEnum):
     GLOBAL = "global"
     USER = "usuario"
@@ -75,6 +89,11 @@ class User(Base):
     keycloak_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     role: Mapped[str] = mapped_column(String(20), default=Role.STUDENT)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Con Keycloak la cuenta se activa con el enlace del correo de verificación.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Eliminación diferida: la cuenta queda oculta y se borra en deletion_scheduled_for.
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deletion_scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     first_name: Mapped[str] = mapped_column(String(80), default="")
     last_name: Mapped[str] = mapped_column(String(80), default="")
@@ -115,6 +134,10 @@ class User(Base):
     @property
     def is_admin(self) -> bool:
         return self.role == Role.ADMIN
+
+    @property
+    def pending_deletion(self) -> bool:
+        return self.deletion_scheduled_for is not None
 
 
 class Subject(Base):
@@ -271,3 +294,57 @@ class SupportMessage(Base):
 
     sender: Mapped[User] = relationship(foreign_keys=[sender_id])
     recipient: Mapped[User] = relationship(foreign_keys=[recipient_id])
+
+
+class VerificationCode(Base):
+    """Código de un solo uso enviado por correo (p. ej. para confirmar la eliminación)."""
+
+    __tablename__ = "verification_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(30))
+    code_hash: Mapped[str] = mapped_column(String(255))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (CheckConstraint("blocker_id <> blocked_id", name="ck_no_self_block"),)
+
+    blocker_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    blocked_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    blocked: Mapped[User] = relationship(foreign_keys=[blocked_id])
+
+
+class UserReport(Base):
+    __tablename__ = "user_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reported_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    reason: Mapped[str] = mapped_column(String(30))
+    description: Mapped[str] = mapped_column(Text, default="")
+    # Contenido concreto reportado (opcional). Si se elimina, el reporte se conserva.
+    post_id: Mapped[int | None] = mapped_column(ForeignKey("posts.id", ondelete="SET NULL"))
+    comment_id: Mapped[int | None] = mapped_column(ForeignKey("comments.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(20), default=ReportStatus.PENDING, index=True)
+    admin_note: Mapped[str] = mapped_column(Text, default="")
+    resolved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    reporter: Mapped[User] = relationship(foreign_keys=[reporter_id])
+    reported: Mapped[User] = relationship(foreign_keys=[reported_id])
+    resolved_by: Mapped[User | None] = relationship(foreign_keys=[resolved_by_id])
+    post: Mapped[Post | None] = relationship()
+    comment: Mapped[Comment | None] = relationship()
