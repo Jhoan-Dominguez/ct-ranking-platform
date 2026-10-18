@@ -375,11 +375,17 @@ def _sync_keycloak_user(session: Session, identity: Identity) -> User:
             select(User).where(func.lower(User.username) == identity.username.lower())
         )
     if user is None:
+        # Primer login de un usuario que sólo existe en Keycloak (creado en su consola o con
+        # Google). Los defaults de SQLAlchemy se aplican al insertar, así que se fijan aquí y se
+        # hace flush para que el resto de la función (p. ej. is_active) vea valores reales.
         user = User(
             username=identity.username,
             email=identity.email or f"{identity.username}@sin-correo.local",
+            role=Role.STUDENT,
+            is_active=True,
         )
         session.add(user)
+        session.flush()
     user.keycloak_id = identity.external_id
     if identity.email:
         user.email = identity.email
