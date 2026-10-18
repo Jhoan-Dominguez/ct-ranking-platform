@@ -4,16 +4,137 @@ from __future__ import annotations
 
 from datetime import date
 
+import requests
 import streamlit as st
 
+from app.config import get_settings
 from app.db.session import session_scope
-from app.services import auth, social, users
+from app.services import accounts, auth, social, users
 from app.ui import common
+
+CODE_SENT = "_deletion_code_sent"
+
+
+def _otp_input(two_factor: bool, key: str) -> str:
+    if not two_factor:
+        return ""
+    return st.text_input("Código de tu app autenticadora (2FA)", max_chars=6, key=key)
+
+
+def _security_tab(user, two_factor: bool) -> None:
+    st.text_input("Usuario", user.username, disabled=True)
+    with st.form("email"):
+        email = st.text_input("Correo electrónico", user.email)
+        if st.form_submit_button("Actualizar correo"):
+            common.run_action(
+                lambda s: auth.change_email(s, s.merge(user), email), "Correo actualizado"
+            )
+    with st.form("password", clear_on_submit=True):
+        st.markdown("**Cambiar contraseña**")
+        current_pwd = st.text_input("Contraseña actual", type="password")
+        new_pwd = st.text_input("Nueva contraseña", type="password")
+        new_pwd2 = st.text_input("Repite la nueva contraseña", type="password")
+        otp = _otp_input(two_factor, "pwd_otp")
+        if st.form_submit_button("Cambiar contraseña"):
+            if new_pwd != new_pwd2:
+                st.error("Las contraseñas no coinciden.")
+            else:
+                common.run_action(
+                    lambda s: auth.change_password(
+                        s, s.merge(user), current_pwd, new_pwd, otp or None
+                    ),
+                    "Contraseña actualizada",
+                )
+
+    st.markdown("#### 🔐 Verificación en dos pasos (2FA)")
+    if not auth.two_factor_supported():
+        st.info("La verificación en dos pasos requiere Keycloak (`AUTH_PROVIDER=keycloak`).")
+        return
+    if two_factor:
+        st.success("Activada: al iniciar sesión te pediremos el código de tu app autenticadora.")
+        with st.expander("Desactivar 2FA"), st.form("disable_2fa", clear_on_submit=True):
+            password = st.text_input("Contraseña", type="password")
+            code = st.text_input("Código actual de tu app autenticadora", max_chars=6)
+            if st.form_submit_button("Desactivar 2FA"):
+                common.run_action(
+                    lambda _s: auth.disable_two_factor(user, password, code),
+                    "Verificación en dos pasos desactivada",
+                )
+        return
+    st.write(
+        "Protege tu cuenta con un código temporal de 6 dígitos que genera una app en tu celular "
+        "(Google Authenticator, Microsoft Authenticator o FreeOTP)."
+    )
+    st.markdown(
+        f"1. Pulsa **Enviar enlace de configuración**: llegará un correo a **{user.email}**.\n"
+        "2. Abre el enlace: verás un **código QR**. Escanéalo con tu app autenticadora.\n"
+        "3. Escribe en esa página el código que muestra la app para confirmar.\n"
+        "4. Desde entonces, al iniciar sesión escribe también el código de la app."
+    )
+    if st.button("Enviar enlace de configuración", icon="📧", type="primary"):
+        common.run_action(
+            lambda _s: auth.request_two_factor_setup(user),
+            f"Te enviamos el enlace a {user.email} (válido por {auth.TOTP_SETUP_LINK_HOURS} horas)",
+        )
+
+
+def _delete_tab(user, two_factor: bool) -> None:
+    days = get_settings().account_deletion_days
+    st.markdown("#### ⚠️ Eliminar mi cuenta")
+    st.write(
+        f"Tu cuenta quedará **desactivada** de inmediato y se eliminará definitivamente a los "
+        f"**{days} días**, junto con tu perfil, plan académico, notas, publicaciones, comentarios, "
+        "retos creados, participaciones, seguidores y mensajes. Durante ese plazo puedes "
+        "cancelarlo iniciando sesión."
+    )
+    if not st.session_state.get(CODE_SENT):
+        st.markdown("**Paso 1 de 2:** confirma que eres tú.")
+        with st.form("delete_step1", clear_on_submit=True):
+            password = st.text_input("Contraseña", type="password")
+            otp = _otp_input(two_factor, "delete_otp")
+            if st.form_submit_button("Enviarme el código de confirmación", icon="📧"):
+
+                def _request(s):
+                    accounts.request_deletion(s, s.merge(user), password, otp or None)
+                    st.session_state[CODE_SENT] = True
+
+                common.run_action(_request, f"Te enviamos un código a {user.email}")
+        return
+
+    st.markdown(f"**Paso 2 de 2:** escribe el código que enviamos a **{user.email}**.")
+    with st.form("delete_step2"):
+        code = st.text_input("Código de 6 dígitos", max_chars=6)
+        confirm = st.checkbox(
+            f"Entiendo que mi cuenta se eliminará definitivamente en {days} días."
+        )
+        if st.form_submit_button("Eliminar mi cuenta", type="primary", icon="🗑️"):
+            if not confirm:
+                st.error("Marca la casilla de confirmación.")
+            else:
+                when = common.run_action(
+                    lambda s: accounts.confirm_deletion(s, s.merge(user), code), rerun=False
+                )
+                if when is not None:
+                    common.logout()
+                    common.flash(
+                        f"Tu cuenta se eliminará el {common.fmt_dt(when)}. Inicia sesión antes "
+                        "de esa fecha si quieres cancelarlo.",
+                        "⚠️",
+                    )
+                    st.rerun()
+    if st.button("Volver a empezar", icon="↩️"):
+        st.session_state.pop(CODE_SENT, None)
+        st.rerun()
 
 
 def render() -> None:
     user = common.require_user()
     st.title("👤 Mi perfil")
+    try:
+        two_factor = auth.two_factor_enabled(user)
+    except (auth.AuthError, requests.RequestException):
+        two_factor = False
+        st.warning("No fue posible consultar el estado del 2FA en Keycloak.", icon="⚠️")
 
     left, right = st.columns([1, 3])
     with left:
@@ -28,8 +149,8 @@ def render() -> None:
         st.caption(f"Rol: {'administrador' if user.is_admin else 'estudiante'}")
 
     with right:
-        tab_data, tab_academic, tab_security = st.tabs(
-            ["Datos personales", "Datos académicos", "Cuenta y seguridad"]
+        tab_data, tab_academic, tab_security, tab_delete = st.tabs(
+            ["Datos personales", "Datos académicos", "Cuenta y seguridad", "Eliminar cuenta"]
         )
         with tab_data, st.form("profile"):
             c1, c2, c3 = st.columns(3)
@@ -97,26 +218,9 @@ def render() -> None:
                 )
 
         with tab_security:
-            st.text_input("Usuario", user.username, disabled=True)
-            with st.form("email"):
-                email = st.text_input("Correo electrónico", user.email)
-                if st.form_submit_button("Actualizar correo"):
-                    common.run_action(
-                        lambda s: auth.change_email(s, s.merge(user), email), "Correo actualizado"
-                    )
-            with st.form("password", clear_on_submit=True):
-                st.markdown("**Cambiar contraseña**")
-                current_pwd = st.text_input("Contraseña actual", type="password")
-                new_pwd = st.text_input("Nueva contraseña", type="password")
-                new_pwd2 = st.text_input("Repite la nueva contraseña", type="password")
-                if st.form_submit_button("Cambiar contraseña"):
-                    if new_pwd != new_pwd2:
-                        st.error("Las contraseñas no coinciden.")
-                    else:
-                        common.run_action(
-                            lambda s: auth.change_password(s, s.merge(user), current_pwd, new_pwd),
-                            "Contraseña actualizada",
-                        )
+            _security_tab(user, two_factor)
+        with tab_delete:
+            _delete_tab(user, two_factor)
 
     with session_scope() as s:
         n_followers, n_following = social.follow_counts(s, user.id)
