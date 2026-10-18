@@ -42,6 +42,8 @@ class Settings:
     # "smtp" envía correos reales; "memory" los guarda en memoria (pruebas).
     mail_backend: str
     account_deletion_days: int
+    # Dominio obligatorio del correo de los estudiantes (los administradores están exentos).
+    student_email_domain: str
 
 
 def _database_url() -> str:
@@ -80,4 +82,8 @@ def get_settings() -> Settings:
         mail_from_name=os.getenv("MAIL_FROM_NAME", "CT Ranking"),
         mail_backend=os.getenv("MAIL_BACKEND", "smtp").lower(),
         account_deletion_days=int(os.getenv("ACCOUNT_DELETION_DAYS", "7")),
+        student_email_domain=os.getenv("STUDENT_EMAIL_DOMAIN", "estudiantes.areandina.edu.co")
+        .strip()
+        .lstrip("@")
+        .lower(),
     )

@@ -164,7 +164,7 @@ def load_demo(seed: int = 7) -> None:
                 user = auth.register(
                     session,
                     username=username,
-                    email=f"{username}@demo.edu.co",
+                    email=auth.student_email(username),
                     password=DEMO_PASSWORD,
                     first_name=first,
                     last_name=last,
@@ -174,7 +174,7 @@ def load_demo(seed: int = 7) -> None:
                 # Ya existe en Keycloak (p. ej. tras `make reset-db`): se vincula al iniciar sesión.
                 user = User(
                     username=username,
-                    email=f"{username}@demo.edu.co",
+                    email=auth.student_email(username),
                     first_name=first,
                     last_name=last,
                 )

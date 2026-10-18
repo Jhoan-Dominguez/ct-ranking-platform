@@ -26,6 +26,7 @@ from app.db.models import Role, User
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{3,30}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+LOCAL_PART_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._+-]{0,62}[a-z0-9])?$")
 TIMEOUT = 10
 
 
@@ -63,6 +64,31 @@ def validate_email(email: str) -> str:
     email = email.strip().lower()
     if not EMAIL_RE.match(email):
         raise AuthError("Correo electrónico inválido.")
+    return email
+
+
+def student_domain() -> str:
+    return get_settings().student_email_domain
+
+
+def student_email(local_part: str) -> str:
+    """Arma el correo institucional a partir de lo que va antes de la @."""
+    local = local_part.strip().lower()
+    if "@" in local:
+        raise AuthError(f"Escribe sólo la parte antes de @{student_domain()}.")
+    if not LOCAL_PART_RE.match(local) or ".." in local:
+        raise AuthError(
+            "Usuario de correo inválido: usa letras, números, punto, guion o guion bajo."
+        )
+    return f"{local}@{student_domain()}"
+
+
+def validate_student_email(email: str) -> str:
+    """Los estudiantes deben usar el correo del dominio institucional."""
+    email = validate_email(email)
+    if not email.endswith("@" + student_domain()):
+        raise AuthError(f"Debes usar tu correo institucional @{student_domain()}.")
+    student_email(email.split("@", 1)[0])  # valida la parte local
     return email
 
 
@@ -402,7 +428,7 @@ def register(
     pendiente de activación y Keycloak envía el enlace de verificación al correo. Con el
     proveedor local la cuenta queda activa de inmediato."""
     username = validate_username(username)
-    email = validate_email(email)
+    email = validate_email(email) if role == Role.ADMIN else validate_student_email(email)
     first_name, last_name = validate_names(first_name, last_name)
     validate_password(password)
     _ensure_unique(session, username, email)
@@ -498,7 +524,7 @@ def change_password(
 
 
 def change_email(session: Session, user: User, email: str) -> None:
-    email = validate_email(email)
+    email = validate_email(email) if user.is_admin else validate_student_email(email)
     if email == user.email:
         return
     _ensure_unique(session, user.username, email, exclude_id=user.id)
