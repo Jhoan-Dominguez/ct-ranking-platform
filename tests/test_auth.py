@@ -104,3 +104,13 @@ def test_first_keycloak_login_creates_active_user(session):
     identity = auth.Identity(external_id="kc-new", username="nuevo", email="n@x.co")
     user = auth_service._sync_keycloak_user(session, identity)
     assert user.id is not None and user.is_active is True and user.role == "student"
+
+
+def test_begin_login_without_two_factor_completes_login(session, make_user):
+    """Paso 1 del login: sin 2FA (proveedor local) inicia sesión directamente."""
+    user = make_user(username="pedro", password="Clave1234")
+    assert auth.begin_login(session, "pedro", "Clave1234").id == user.id
+    with pytest.raises(auth.AuthError):
+        auth.begin_login(session, "pedro", "mala12345")
+    with pytest.raises(auth.AuthError, match="Ingresa"):
+        auth.begin_login(session, "pedro", "")
