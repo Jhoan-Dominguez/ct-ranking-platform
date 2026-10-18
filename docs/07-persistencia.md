@@ -102,6 +102,11 @@ def run_action(fn, success=None, rerun=True):
 | Etiquetas del foro | `posts.tags` | Texto separado por comas, en minúsculas. |
 | Reglas de retos | Código: `app/services/challenge_rules.py` | `challenges.rule` guarda sólo el código (`first_post`, …). |
 | Estado de sesión de la UI | Memoria del servidor (`st.session_state`) | No persiste. |
+| Códigos de verificación por correo | `verification_codes.code_hash` | `HMAC-SHA256` con el secreto del servidor. Caducan a los 15 min. |
+| Secreto TOTP del 2FA | BD `keycloak` | Lo guarda y valida Keycloak. La app nunca lo ve. |
+| Bloqueos y reportes | `user_blocks`, `user_reports` | |
+| Eliminación programada | `users.deletion_requested_at`, `deletion_scheduled_for` | La purga borra la fila y su contenido en cascada. |
+| Correos enviados | No se guardan | En desarrollo se ven en Mailpit (http://localhost:8025). |
 
 ## Consultas destacadas
 
@@ -121,6 +126,10 @@ def run_action(fn, success=None, rerun=True):
 
 1. `Base.metadata.create_all(engine)`: crea las tablas, índices y restricciones que **no
    existan**. No modifica las tablas existentes.
+1. `COLUMN_UPGRADES`: sólo en PostgreSQL, sentencias idempotentes
+   `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` que agregan a tablas existentes las columnas
+   nuevas (`users.email_verified`, `deletion_requested_at`, `deletion_scheduled_for`), sin
+   perder datos.
 2. `seed_base()`:
    - Crea o actualiza el usuario `APP_ADMIN_USERNAME` con rol `admin`, más el hash local si
      `AUTH_PROVIDER=local`.
@@ -133,8 +142,14 @@ Opciones:
 
 ## Evolución del esquema
 
-El proyecto **no usa migraciones**. Cambiar o agregar una columna a una tabla existente
-requiere recrearla con `make reset-db`. Así se agregó, por ejemplo, `subjects.category`.
+El proyecto **no usa una herramienta de migraciones**:
+
+- **Tablas nuevas:** las crea `create_all`.
+- **Columnas nuevas en tablas existentes:** se agregan a la lista `COLUMN_UPGRADES` de
+  `app/db/init_db.py` y se aplican con `make init-db` (o `make up`). Así se agregaron las columnas
+  de activación y de eliminación de cuentas.
+- **Cambios de tipo, renombres o borrados de columnas:** requieren `make reset-db`. Así se agregó,
+  en su momento, `subjects.category`.
 
 Para conservar los datos en entornos reales se recomienda incorporar **Alembic**:
 

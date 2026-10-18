@@ -21,6 +21,13 @@ erDiagram
     users ||--o{ follows : "es seguido (followed)"
     users ||--o{ support_messages : "envía (sender)"
     users ||--o{ support_messages : "recibe (recipient)"
+    users ||--o{ verification_codes : "recibe códigos"
+    users ||--o{ user_blocks : "bloquea (blocker)"
+    users ||--o{ user_blocks : "es bloqueado (blocked)"
+    users ||--o{ user_reports : "reporta (reporter)"
+    users ||--o{ user_reports : "es reportado (reported)"
+    posts |o--o{ user_reports : "contenido reportado"
+    comments |o--o{ user_reports : "contenido reportado"
 
     users {
         int id PK
@@ -39,6 +46,9 @@ erDiagram
         int total_semesters
         timestamptz created_at
         timestamptz last_login
+        bool email_verified
+        timestamptz deletion_requested_at
+        timestamptz deletion_scheduled_for
     }
     subjects {
         int id PK
@@ -135,6 +145,8 @@ PostgreSQL, así que agregar un valor no requiere migración. Los servicios vali
 | `ChallengeKind` | `global`, `usuario` | `challenges.kind` |
 | `Visibility` | `publico`, `seguidores` | `challenges.visibility` |
 | `Difficulty` | `facil`, `media`, `dificil` | `challenges.difficulty` |
+| `ReportReason` | `spam`, `acoso`, `contenido_inapropiado`, `suplantacion`, `otro` | `user_reports.reason` |
+| `ReportStatus` | `pendiente`, `resuelto`, `descartado` | `user_reports.status` |
 
 Las categorías de foro (`posts.category`) no son un enum de base de datos. Son una lista en
 `app/services/forum.py` (`CATEGORIES`): General, Duda académica, Problemática, Proyecto, Recursos y
@@ -174,6 +186,9 @@ Vida universitaria.
 | `total_semesters` | integer | no | `10` | Semestres del plan. Cargar un pensum lo ajusta. |
 | `created_at` | timestamptz | no | ahora | Fecha de registro. |
 | `last_login` | timestamptz | sí | — | Se actualiza en cada login. Se usa para "activos en 7 días". |
+| `email_verified` | boolean | no | `true` | `false` mientras no se abra el enlace de activación (Keycloak). Se sincroniza en cada login. |
+| `deletion_requested_at` | timestamptz | sí | — | Cuándo se confirmó la solicitud de eliminación. |
+| `deletion_scheduled_for` | timestamptz | sí | — | Fecha de borrado definitivo. Si no es `NULL`, la cuenta está desactivada y oculta. |
 
 Propiedades calculadas (no son columnas): `full_name`, `display_name` (alias, luego nombre
 completo, luego username) e `is_admin`.
@@ -285,6 +300,42 @@ PK compuesta `(follower_id, followed_id)`, ambas FK → `users.id` CASCADE, más
 | `is_read` | boolean | no | `false` | Se marca al abrir la bandeja. |
 | `created_at` | timestamptz | no | ahora | |
 
+### `verification_codes`: códigos de un solo uso
+
+| Columna | Tipo | Nulo | Default | Descripción |
+|---------|------|------|---------|-------------|
+| `id` | integer | no | serial | PK. |
+| `user_id` | integer | no | — | FK → `users.id` CASCADE. Índice. |
+| `purpose` | varchar(30) | no | — | Para qué sirve. Hoy sólo existe `delete_account`. |
+| `code_hash` | varchar(255) | no | — | `HMAC-SHA256(código, secreto del servidor)`. El código nunca se guarda en claro. |
+| `attempts` | integer | no | `0` | Intentos fallidos (máx. 5). |
+| `expires_at` | timestamptz | no | — | Creación + 15 minutos. |
+| `used_at` | timestamptz | sí | — | Momento de uso o de invalidación (al pedir un código nuevo). |
+| `created_at` | timestamptz | no | ahora | |
+
+### `user_blocks`: bloqueos
+
+PK compuesta `(blocker_id, blocked_id)`, ambas FK → `users.id` CASCADE, más `created_at`.
+`CHECK ck_no_self_block (blocker_id <> blocked_id)` impide bloquearse a sí mismo. Los efectos
+del bloqueo se aplican en ambas direcciones (ver
+[Cuentas y moderación](14-cuentas-seguridad-y-moderacion.md#bloquear-usuarios)).
+
+### `user_reports`: reportes
+
+| Columna | Tipo | Nulo | Default | Descripción |
+|---------|------|------|---------|-------------|
+| `id` | integer | no | serial | PK. |
+| `reporter_id` | integer | no | — | Quién reporta. FK → `users.id` CASCADE. Índice. |
+| `reported_id` | integer | no | — | Usuario reportado. FK → `users.id` CASCADE. Índice. |
+| `reason` | varchar(30) | no | — | Ver `ReportReason`. |
+| `description` | text | no | `''` | Obligatoria si el motivo es `otro` (máx. 2000 caracteres). |
+| `post_id` | integer | sí | — | Publicación reportada. FK → `posts.id` `ON DELETE SET NULL`. |
+| `comment_id` | integer | sí | — | Comentario reportado. FK → `comments.id` `ON DELETE SET NULL`. |
+| `status` | varchar(20) | no | `pendiente` | Ver `ReportStatus`. Índice. |
+| `admin_note` | text | no | `''` | Nota del administrador al cerrarlo. |
+| `resolved_by_id` | integer | sí | — | Administrador que lo cerró. FK → `users.id` `ON DELETE SET NULL`. |
+| `created_at`, `resolved_at` | timestamptz | no / sí | ahora / — | |
+
 ## Índices y restricciones
 
 | Nombre | Tabla | Tipo |
@@ -300,6 +351,9 @@ PK compuesta `(follower_id, followed_id)`, ambas FK → `users.id` CASCADE, más
 | `ix_support_messages_sender_id`, `…_recipient_id` | support_messages | índices |
 | `ck_item_weight` | grade_items | CHECK |
 | `ck_no_self_follow` | follows | CHECK |
+| `ix_verification_codes_user_id` | verification_codes | índice |
+| `ck_no_self_block` | user_blocks | CHECK |
+| `ix_user_reports_reporter_id`, `…_reported_id`, `…_status` | user_reports | índices |
 
 ## Borrado en cascada
 
@@ -312,6 +366,8 @@ Todas las claves foráneas tienen `ON DELETE CASCADE`. Además, varias relacione
 | Una materia | Sus ítems calificables. |
 | Una publicación | Sus comentarios y "me gusta". |
 | Un reto | Sus participaciones (y con ellas el ranking del reto). |
+| Una publicación o un comentario reportado | El reporte **no** se borra: `post_id` / `comment_id` pasan a `NULL` (`ON DELETE SET NULL`). |
+| El administrador que resolvió un reporte | `resolved_by_id` pasa a `NULL`. |
 
 ## Base de datos de Keycloak
 

@@ -21,17 +21,19 @@ funcional del proyecto.
 | 11 | [Datos iniciales, pensum y demo](11-datos-iniciales-y-demo.md) | Retos globales, pensum de Ingeniería de Software y datos de demostración. |
 | 12 | [Desarrollo, calidad y pruebas](12-desarrollo-y-pruebas.md) | Flujo de trabajo, pre-commit (isort y ruff), pruebas y cómo extender la plataforma. |
 | 13 | [Solución de problemas](13-solucion-de-problemas.md) | Errores frecuentes y cómo resolverlos. |
+| 14 | [Cuentas, seguridad y moderación](14-cuentas-seguridad-y-moderacion.md) | Activación por correo, 2FA con QR, eliminación diferida, bloqueos, reportes y correo (Mailpit/SMTP). |
 
 ## Inicio rápido
 
 ```bash
 make create      # .env + dependencias en .venv + hooks de pre-commit
-make up          # PostgreSQL + Keycloak en Docker; crea tablas y datos base
+make up          # PostgreSQL + Keycloak + Mailpit en Docker; configura Keycloak, crea tablas y datos base
 make seed-demo   # usuarios y datos de ejemplo (opcional)
 make run         # http://localhost:8501
 ```
 
 - Administrador: `admin` / `Admin123!`.
+- Correos de desarrollo (Mailpit): http://localhost:8025.
 - Usuarios demo: ver [Datos iniciales y demo](11-datos-iniciales-y-demo.md), contraseña `Demo1234`.
 
 ## Otros documentos del repositorio
