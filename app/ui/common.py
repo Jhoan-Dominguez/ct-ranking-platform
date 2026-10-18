@@ -15,10 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Challenge, SubjectCategory, User
 from app.db.session import session_scope
-from app.services import auth, challenges
+from app.services import accounts, auth, challenges
 from app.services.academics import AcademicError
+from app.services.accounts import AccountError
 from app.services.challenges import ChallengeError
 from app.services.forum import ForumError
+from app.services.mailer import MailError
+from app.services.moderation import ModerationError
 from app.services.social import SocialError
 from app.services.users import ProfileError
 
@@ -31,6 +34,9 @@ CATEGORY_LABELS = {
 
 USER_ERRORS = (
     auth.AuthError,
+    AccountError,
+    MailError,
+    ModerationError,
     AcademicError,
     ChallengeError,
     ForumError,
@@ -174,18 +180,21 @@ def challenge_ranking_banner(session: Session, challenge_id: int) -> None:
     challenge = session.get(Challenge, challenge_id)
     if challenge is None:
         return
-    entries = challenges.ranking(session, challenge_id)
+    # Las cuentas en proceso de eliminación no se muestran (siguen contando en las métricas).
+    hidden = accounts.pending_deletion_ids(session)
+    entries = [e for e in challenges.ranking(session, challenge_id) if e.user.id not in hidden]
     stats = challenges.stats(session, challenge_id)
+    first = next((e for e in entries if e.position), None)
     with st.container(border=True):
         st.markdown(f"#### 🏆 {challenge.title}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Participantes", stats.participants)
         c2.metric("Completado", stats.completed)
         c3.metric("Éxito", f"{stats.completion_rate:.0%}")
-        if stats.first:
+        if first:
             st.success(
-                f"🚀 Primero en cumplirlo: **{stats.first.user.display_name}** "
-                f"({fmt_dt(stats.first.completed_at)})"
+                f"🚀 Primero en cumplirlo: **{first.user.display_name}** "
+                f"({fmt_dt(first.completed_at)})"
             )
         if not entries:
             st.caption("Nadie se ha unido todavía. ¡Sé el primero!")
@@ -198,6 +207,7 @@ def challenge_ranking_banner(session: Session, challenge_id: int) -> None:
 
 
 def leaderboard_banner(session: Session, title: str = "Ranking general", **kwargs) -> None:
+    kwargs.setdefault("exclude_ids", accounts.pending_deletion_ids(session))
     board = challenges.leaderboard(session, **kwargs)
     with st.container(border=True):
         st.markdown(f"#### 📊 {title}")

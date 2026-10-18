@@ -12,7 +12,8 @@ import streamlit as st
 from sqlalchemy.exc import OperationalError
 
 from app.db.session import session_scope
-from app.services import social
+from app.jobs.purge_accounts import start_background_purge
+from app.services import accounts, social
 from app.ui import common
 from app.views import (
     academics,
@@ -29,7 +30,32 @@ from app.views import (
 st.set_page_config(page_title="CT Ranking", page_icon="🎓", layout="wide")
 
 
+def pending_deletion_page(user) -> None:
+    """Única pantalla disponible para una cuenta con eliminación programada."""
+    _, center, _ = st.columns([1, 1.6, 1])
+    with center:
+        st.title("Tu cuenta será eliminada")
+        when = common.fmt_dt(user.deletion_scheduled_for)
+        st.warning(
+            f"Solicitaste eliminar tu cuenta. Está **desactivada** y se borrará definitivamente "
+            f"el **{when}**, junto con tu perfil, plan académico, publicaciones y demás datos.",
+            icon="⚠️",
+        )
+        st.write("Mientras tanto nadie puede ver tu perfil ni tu contenido.")
+        c1, c2 = st.columns(2)
+        if c1.button("Cancelar eliminación", type="primary", icon="↩️", width="stretch"):
+
+            def _cancel(s):
+                accounts.cancel_deletion(s, s.merge(user))
+
+            common.run_action(_cancel, "¡Tu cuenta vuelve a estar activa!")
+        if c2.button("Cerrar sesión", icon="🚪", width="stretch"):
+            common.logout()
+            st.rerun()
+
+
 def main() -> None:
+    start_background_purge()
     try:
         user = common.current_user()
     except OperationalError:
@@ -41,6 +67,13 @@ def main() -> None:
 
     if user is None:
         st.navigation([st.Page(login.render, title="Ingresar", icon="🔐")], position="hidden").run()
+        return
+    if user.pending_deletion:
+        common.show_flashes()
+        st.navigation(
+            [st.Page(lambda: pending_deletion_page(user), title="Cuenta", icon="⚠️")],
+            position="hidden",
+        ).run()
         return
 
     with session_scope() as s:
