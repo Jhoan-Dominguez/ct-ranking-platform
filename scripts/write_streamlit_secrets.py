@@ -1,8 +1,11 @@
 """Genera ``.streamlit/secrets.toml`` con la configuración de ``st.login`` (OIDC con Keycloak).
 
 Streamlit sólo lee la configuración de autenticación desde ``secrets.toml``, así que este
-script la arma a partir de ``.env``. Se ejecuta en ``make up`` y ``make run``. El archivo está en
-``.gitignore`` porque contiene secretos.
+script la arma a partir de ``.env``. El contenedor de la app lo ejecuta al arrancar. El archivo
+está en ``.gitignore`` porque contiene secretos.
+
+Por defecto se escribe en ``.streamlit/secrets.toml`` del proyecto; ``STREAMLIT_SECRETS_FILE``
+cambia la ruta (la imagen usa ``~/.streamlit/secrets.toml``, que Streamlit también lee).
 
 El proveedor ``google`` apunta a Keycloak con ``kc_idp_hint=google``: Keycloak redirige directo
 a Google sin mostrar su propia página de login.
@@ -13,10 +16,11 @@ from __future__ import annotations
 import os
 import secrets
 import tomllib
+from pathlib import Path
 
 from app.core.config import ROOT_DIR, get_settings
 
-SECRETS_FILE = ROOT_DIR / ".streamlit" / "secrets.toml"
+SECRETS_FILE = Path(os.getenv("STREAMLIT_SECRETS_FILE") or ROOT_DIR / ".streamlit" / "secrets.toml")
 
 
 def _toml_str(value: str) -> str:
@@ -53,13 +57,13 @@ def main() -> None:
             'authorize_params = { kc_idp_hint = "google" }',
             "",
         ]
-    SECRETS_FILE.parent.mkdir(exist_ok=True)
+    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
     # Sólo el dueño puede leerlo: contiene el secreto de la cookie y el del cliente de Keycloak.
     fd = os.open(SECRETS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines))
     SECRETS_FILE.chmod(0o600)  # por si el archivo ya existía con otros permisos
-    print(f"Configuración de st.login escrita en {SECRETS_FILE.relative_to(ROOT_DIR)}")
+    print(f"Configuración de st.login escrita en {SECRETS_FILE}")
 
 
 if __name__ == "__main__":

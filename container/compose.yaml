@@ -1,0 +1,141 @@
+# Servicios de CT Ranking. Funciona con Docker y con Podman; el Makefile elige el motor:
+#
+#   make up                      # usa docker si está instalado; si no, podman
+#   make up ENGINE=podman
+#
+# A mano, desde la raíz del repositorio (las variables ${...} salen de .env):
+#
+#   docker compose --env-file .env -f container/compose.yaml up -d
+#   podman compose --env-file .env -f container/compose.yaml up -d
+#
+# Notas de compatibilidad:
+# - Imágenes con nombre completo (docker.io/..., quay.io/...): Podman no resuelve nombres cortos.
+# - Los bind mounts llevan `z` (etiqueta SELinux compartida). En Fedora/RHEL con Podman sin esto
+#   el contenedor no puede leer los archivos; en sistemas sin SELinux se ignora.
+# - La app no escribe en carpetas del host (sólo en volúmenes), así no hay problemas de dueños con
+#   Podman rootless.
+name: ct-ranking
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: container/Dockerfile
+  image: localhost/ct-ranking-app:latest
+  env_file: ../.env
+  # Dentro de la red de compose los servicios se llaman por su nombre. Estos valores reemplazan a
+  # los de .env (que describen los puertos publicados en el host).
+  environment:
+    DATABASE_URL: ""
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    KEYCLOAK_URL: http://keycloak:8080
+
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ctranking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ctranking}
+      POSTGRES_DB: ${POSTGRES_DB:-ctranking}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Crea la base de datos de Keycloak la primera vez que se inicializa el volumen.
+      - ./postgres:/docker-entrypoint-initdb.d:ro,z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-ctranking}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ctranking}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
+      # URL que ve el navegador. Fija el emisor (iss) de los tokens y los enlaces de los correos,
+      # aunque la app hable con Keycloak por la red interna (http://keycloak:8080): con
+      # backchannel dinámico, las llamadas servidor a servidor usan la URL con la que llegan.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Se sustituyen dentro de container/keycloak/ct-ranking-realm.json al importar.
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-ct-ranking-dev-secret}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME:-admin}
+      APP_ADMIN_EMAIL: ${APP_ADMIN_EMAIL:-admin@ctranking.local}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:-Admin123!}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro,z
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+  # Servidor SMTP de desarrollo: atrapa todos los correos (de Keycloak y de la app) y los muestra
+  # en http://localhost:8025 sin enviarlos realmente. En producción se usa un SMTP real (.env).
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.31.3
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_UI_PORT:-8025}:8025"
+
+  # Tarea de una sola vez (make up la ejecuta con `compose run --rm setup`): espera a PostgreSQL y
+  # Keycloak, configura el realm (SMTP, URLs, cliente pwcheck, Google) y crea tablas y datos base.
+  # Es idempotente. El perfil evita que `compose up` la arranque junto con los demás.
+  setup:
+    <<: *app
+    profiles: ["setup"]
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - >-
+        python -m scripts.wait_for_services &&
+        python -m scripts.configure_keycloak &&
+        python -m app.database.init_db
+    depends_on:
+      - db
+      - keycloak
+      - mailpit
+
+  app:
+    <<: *app
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8501}:8501"
+    volumes:
+      # Aquí se guarda .streamlit/secrets.toml (secreto de la cookie de st.login).
+      - streamlit:/home/app/.streamlit
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - db
+      - keycloak
+      - mailpit
+
+volumes:
+  pgdata:
+  streamlit:

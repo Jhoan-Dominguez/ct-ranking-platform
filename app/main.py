@@ -1,4 +1,5 @@
-"""Punto de entrada de Streamlit: ``streamlit run app/main.py`` (o ``make run``)."""
+"""Punto de entrada de Streamlit: ``streamlit run app/main.py``. Con ``make up`` lo ejecuta el
+contenedor de la app (``container/Dockerfile``)."""
 
 from __future__ import annotations
 

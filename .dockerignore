@@ -1,0 +1,17 @@
+# Contexto de compilación de container/Dockerfile (Docker y Podman leen este archivo).
+# Nunca copiar secretos ni entornos locales a la imagen: .env se pasa al arrancar (env_file).
+.env
+.env.*
+.venv/
+venv/
+.git/
+.idea/
+.vscode/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.streamlit/secrets.toml
+docs/
+tests/
+container/
+AUDITORIA.md
