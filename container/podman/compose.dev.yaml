@@ -1,0 +1,19 @@
+# Modo desarrollo con Podman (make dev ENGINE=podman): monta el código del host en el contenedor de la app, así
+# Streamlit recarga al guardar sin volver a construir la imagen. Se combina con compose.yaml:
+#
+#   podman compose -p ct-ranking --env-file .env -f container/podman/compose.yaml \
+#     -f container/podman/compose.dev.yaml up -d app
+#
+# Los montajes son de sólo lectura: con Podman rootless el código del host aparece con otro dueño
+# dentro del contenedor, pero se puede leer (los archivos son legibles por todos).
+services:
+  app:
+    volumes:
+      - ../../app:/app/app:ro,z
+      - ../../scripts:/app/scripts:ro,z
+      - ../../.streamlit/config.toml:/app/.streamlit/config.toml:ro,z
+    environment:
+      STREAMLIT_SERVER_RUN_ON_SAVE: "true"
+      # Sondeo en lugar de inotify: los eventos de archivos no siempre cruzan la VM de
+      # VM de podman machine (macOS y Windows).
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll

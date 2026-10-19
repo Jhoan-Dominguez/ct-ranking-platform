@@ -1,0 +1,18 @@
+# Modo desarrollo con Docker (make dev): monta el código del host en el contenedor de la app, así
+# Streamlit recarga al guardar sin volver a construir la imagen. Se combina con compose.yaml:
+#
+#   docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml \
+#     -f container/docker/compose.dev.yaml up -d app
+#
+# Los montajes son de sólo lectura: la app no escribe en el código.
+services:
+  app:
+    volumes:
+      - ../../app:/app/app:ro,z
+      - ../../scripts:/app/scripts:ro,z
+      - ../../.streamlit/config.toml:/app/.streamlit/config.toml:ro,z
+    environment:
+      STREAMLIT_SERVER_RUN_ON_SAVE: "true"
+      # Sondeo en lugar de inotify: los eventos de archivos no siempre cruzan la VM de
+      # Docker Desktop (macOS y Windows).
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: poll

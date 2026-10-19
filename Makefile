@@ -1,15 +1,29 @@
 VENV        ?= .venv
 PYTHON      := $(VENV)/bin/python
 PIP         := $(VENV)/bin/pip
-# Motor de contenedores: docker si está instalado, si no podman (o make up ENGINE=podman).
+# Motor de contenedores: docker o podman. Por defecto docker si está instalado, si no podman.
+#   make up ENGINE=podman
 ENGINE      ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo podman)
-COMPOSE     := $(ENGINE) compose --env-file .env -f container/compose.yaml
-COMPOSE_DEV := $(COMPOSE) -f container/compose.dev.yaml
+ifeq ($(filter $(ENGINE),docker podman),)
+$(error ENGINE debe ser docker o podman (recibido: "$(ENGINE)"))
+endif
+# Comando de compose de cada motor. Con Podman se puede usar el provider directamente:
+#   make up ENGINE=podman PODMAN_COMPOSE=podman-compose
+DOCKER_COMPOSE ?= docker compose
+PODMAN_COMPOSE ?= podman compose
+COMPOSE_CMD := $(if $(filter podman,$(ENGINE)),$(PODMAN_COMPOSE),$(DOCKER_COMPOSE))
+# Archivos de cada motor: container/docker/ o container/podman/ (ver container/README.md).
+CONTAINER_DIR := container/$(ENGINE)
+COMPOSE     := $(COMPOSE_CMD) -p ct-ranking --env-file .env -f $(CONTAINER_DIR)/compose.yaml
+COMPOSE_DEV := $(COMPOSE) -f $(CONTAINER_DIR)/compose.dev.yaml
 # Comandos de una sola vez dentro de la imagen de la app (con la BD y Keycloak levantados).
 APP_RUN     := $(COMPOSE) run --rm app
+IMAGE       := localhost/ct-ranking-app:latest
+BUILD_FILE  := $(CONTAINER_DIR)/$(if $(filter podman,$(ENGINE)),Containerfile,Dockerfile)
 
 .DEFAULT_GOAL := help
-.PHONY: help create env install check-env build up dev run down restart logs ps shell init-db \
+.PHONY: help create env install check-env engine build image up dev run down restart logs ps shell \
+        init-db \
         seed-demo reset-db purge-accounts migrate-emails test lint format clean destroy
 
 help: ## Muestra esta ayuda
@@ -37,8 +51,16 @@ check-env: env
 
 # ---------------------------------------------------------------- contenedores
 
-build: env ## Construye la imagen de la app (python:3.13-slim)
+engine: ## Muestra el motor y los archivos que se usarán (ENGINE=docker|podman)
+	@echo "Motor:    $(ENGINE) ($$($(ENGINE) --version 2>/dev/null || echo 'no instalado'))"
+	@v="$$($(COMPOSE_CMD) version 2>/dev/null | head -1)"; echo "Compose:  $(COMPOSE_CMD) ($${v:-no disponible})"
+	@echo "Archivos: $(CONTAINER_DIR)/compose.yaml · $(BUILD_FILE)"
+
+build: env ## Construye la imagen de la app con compose (python:3.13-slim)
 	$(COMPOSE) build app
+
+image: ## Construye la imagen sólo con docker/podman build, sin compose
+	$(ENGINE) build -f $(BUILD_FILE) -t $(IMAGE) .
 
 up: check-env build ## Levanta todo: PostgreSQL, Keycloak, Mailpit, configuración y la app
 	$(COMPOSE) up -d db keycloak mailpit

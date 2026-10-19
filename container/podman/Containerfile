@@ -1,11 +1,14 @@
-# Imagen de la app (Streamlit). Sirve igual para Docker y Podman: el contexto de compilación es la
-# raíz del repositorio (ver container/compose.yaml) y .dockerignore deja fuera .env, .venv, etc.
+# Imagen de la app (Streamlit) para Podman (Buildah). La versión para Docker es
+# container/docker/Dockerfile (mismo contenido; mantenerlos iguales). El contexto de compilación es
+# la raíz del repositorio; Podman lee .containerignore o, si no existe, .dockerignore (deja fuera
+# .env, .venv, etc.).
 #
-#   docker build -f container/Dockerfile -t ct-ranking-app .
-#   podman build -f container/Dockerfile -t ct-ranking-app .
+#   podman build -f container/podman/Containerfile -t localhost/ct-ranking-app .
 #
-# Las imágenes usan nombres completos (docker.io/...): Podman no resuelve nombres cortos por
-# defecto.
+# - Nombre completo de la imagen base: Podman no resuelve nombres cortos (python:3.13-slim) sin
+#   configurar registries.conf.
+# - Sin HEALTHCHECK: Podman lo ignora con el formato de imagen OCI (el predeterminado). El
+#   healthcheck está en container/podman/compose.yaml.
 FROM docker.io/library/python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
