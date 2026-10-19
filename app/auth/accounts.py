@@ -13,26 +13,40 @@ Flujo:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
+from html import escape
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app import auth
 from app.core import mailer
 from app.core.config import get_settings
-from app.database.models import User, VerificationCode
+from app.database.models import Challenge, ChallengeKind, User, VerificationCode
+from app.database.session import CommitBeforeRaiseError
+
+log = logging.getLogger(__name__)
 
 DELETE_PURPOSE = "delete_account"
+EMAIL_PURPOSE = "change_email"
 CODE_TTL = timedelta(minutes=15)
 MAX_ATTEMPTS = 5
+# Espera mínima entre dos códigos del mismo tipo (evita llenar el buzón de alguien).
+RESEND_COOLDOWN = timedelta(seconds=60)
 
 
 class AccountError(ValueError):
     pass
+
+
+class InvalidCodeError(CommitBeforeRaiseError, AccountError):
+    """Código incorrecto. Hereda de ``CommitBeforeRaiseError`` para que el intento fallido quede
+    guardado aunque la acción se revierta; si no, el límite de intentos nunca se aplicaría."""
 
 
 def _now() -> datetime:
@@ -45,7 +59,9 @@ def _aware(value: datetime) -> datetime:
 
 
 def _hash(code: str) -> str:
-    key = get_settings().keycloak_client_secret.encode()  # secreto del servidor como "pepper"
+    settings = get_settings()
+    # APP_SECRET_KEY en producción; en desarrollo se usa el secreto del cliente de Keycloak.
+    key = (settings.app_secret_key or settings.keycloak_client_secret).encode()
     return hmac.new(key, code.encode(), hashlib.sha256).hexdigest()
 
 
@@ -53,16 +69,21 @@ def _fmt(when: datetime) -> str:
     return _aware(when).astimezone().strftime("%d/%m/%Y %H:%M")
 
 
-def request_deletion(session: Session, user: User, password: str, otp: str | None = None) -> None:
-    if user.pending_deletion:
-        raise AccountError("La eliminación de tu cuenta ya está programada.")
-    auth.verify_credentials(user, password, otp)
-    # Invalida códigos anteriores sin usar.
+def _issue_code(session: Session, user: User, purpose: str, payload: str = "") -> str:
+    """Invalida los códigos anteriores sin usar y crea uno nuevo. Devuelve el código en claro
+    (sólo para enviarlo por correo; en la BD queda su HMAC)."""
+    last = session.scalar(
+        select(VerificationCode.created_at)
+        .where(VerificationCode.user_id == user.id, VerificationCode.purpose == purpose)
+        .order_by(VerificationCode.created_at.desc())
+    )
+    if last is not None and _now() - _aware(last) < RESEND_COOLDOWN:
+        raise AccountError("Ya te enviamos un código hace un momento. Espera un minuto.")
     session.execute(
         update(VerificationCode)
         .where(
             VerificationCode.user_id == user.id,
-            VerificationCode.purpose == DELETE_PURPOSE,
+            VerificationCode.purpose == purpose,
             VerificationCode.used_at.is_(None),
         )
         .values(used_at=_now())
@@ -71,30 +92,24 @@ def request_deletion(session: Session, user: User, password: str, otp: str | Non
     session.add(
         VerificationCode(
             user_id=user.id,
-            purpose=DELETE_PURPOSE,
+            purpose=purpose,
             code_hash=_hash(code),
+            payload=payload,
             expires_at=_now() + CODE_TTL,
         )
     )
     session.flush()
-    mailer.send(
-        user.email,
-        "Código para eliminar tu cuenta de CT Ranking",
-        [
-            f"Hola {user.display_name}, recibimos una solicitud para <b>eliminar tu cuenta</b>.",
-            f"Tu código de confirmación es: <b>{code}</b> (válido por 15 minutos).",
-            "Si no fuiste tú, ignora este correo y cambia tu contraseña.",
-        ],
-    )
+    return code
 
 
-def confirm_deletion(session: Session, user: User, code: str) -> datetime:
-    """Valida el código y programa la eliminación. Devuelve la fecha programada."""
+def _consume_code(session: Session, user: User, purpose: str, code: str) -> VerificationCode:
+    """Valida el código vigente y lo marca como usado. Cada fallo suma un intento (que se guarda
+    aunque la transacción termine en error) y al quinto el código deja de servir."""
     record = session.scalar(
         select(VerificationCode)
         .where(
             VerificationCode.user_id == user.id,
-            VerificationCode.purpose == DELETE_PURPOSE,
+            VerificationCode.purpose == purpose,
             VerificationCode.used_at.is_(None),
         )
         .order_by(VerificationCode.created_at.desc())
@@ -107,8 +122,37 @@ def confirm_deletion(session: Session, user: User, code: str) -> datetime:
         record.attempts += 1
         session.flush()
         remaining = MAX_ATTEMPTS - record.attempts
-        raise AccountError(f"Código incorrecto. Te quedan {remaining} intentos.")
+        if remaining <= 0:
+            raise InvalidCodeError("Código incorrecto. Solicita un código nuevo.")
+        raise InvalidCodeError(f"Código incorrecto. Te quedan {remaining} intentos.")
     record.used_at = _now()
+    session.flush()
+    return record
+
+
+# --------------------------------------------------------------------------- eliminación
+
+
+def request_deletion(session: Session, user: User, password: str, otp: str | None = None) -> None:
+    if user.pending_deletion:
+        raise AccountError("La eliminación de tu cuenta ya está programada.")
+    auth.verify_credentials(user, password, otp)
+    code = _issue_code(session, user, DELETE_PURPOSE)
+    mailer.send(
+        user.email,
+        "Código para eliminar tu cuenta de CT Ranking",
+        [
+            f"Hola {escape(user.display_name)}, recibimos una solicitud para "
+            "<b>eliminar tu cuenta</b>.",
+            f"Tu código de confirmación es: <b>{code}</b> (válido por 15 minutos).",
+            "Si no fuiste tú, ignora este correo y cambia tu contraseña.",
+        ],
+    )
+
+
+def confirm_deletion(session: Session, user: User, code: str) -> datetime:
+    """Valida el código y programa la eliminación. Devuelve la fecha programada."""
+    _consume_code(session, user, DELETE_PURPOSE, code)
     days = get_settings().account_deletion_days
     user.deletion_requested_at = _now()
     user.deletion_scheduled_for = _now() + timedelta(days=days)
@@ -117,12 +161,12 @@ def confirm_deletion(session: Session, user: User, code: str) -> datetime:
         user.email,
         "Tu cuenta de CT Ranking será eliminada",
         [
-            f"Hola {user.display_name}, tu cuenta quedó <b>desactivada</b> y se eliminará "
-            f"definitivamente el <b>{_fmt(user.deletion_scheduled_for)}</b>.",
+            f"Hola {escape(user.display_name)}, tu cuenta quedó <b>desactivada</b> y se "
+            f"eliminará definitivamente el <b>{_fmt(user.deletion_scheduled_for)}</b>.",
             "Se borrarán tu perfil, plan académico, notas, publicaciones, comentarios, retos "
             "creados, participaciones, seguidores y mensajes.",
-            f"¿Cambiaste de opinión? Inicia sesión antes de esa fecha en {get_settings().app_url} "
-            "y pulsa «Cancelar eliminación».",
+            f"¿Cambiaste de opinión? Inicia sesión antes de esa fecha en "
+            f"{escape(get_settings().app_url)} y pulsa «Cancelar eliminación».",
         ],
     )
     return user.deletion_scheduled_for
@@ -137,7 +181,10 @@ def cancel_deletion(session: Session, user: User) -> None:
     mailer.send(
         user.email,
         "Cancelaste la eliminación de tu cuenta",
-        [f"Hola {user.display_name}, tu cuenta de CT Ranking vuelve a estar activa. ¡Bienvenido!"],
+        [
+            f"Hola {escape(user.display_name)}, tu cuenta de CT Ranking vuelve a estar activa. "
+            "¡Bienvenido!"
+        ],
     )
 
 
@@ -146,7 +193,11 @@ def pending_deletion_ids(session: Session) -> set[int]:
 
 
 def purge_due_accounts(session: Session, now: datetime | None = None) -> list[str]:
-    """Elimina definitivamente las cuentas cuyo plazo venció. Devuelve los usuarios borrados."""
+    """Elimina definitivamente las cuentas cuyo plazo venció. Devuelve los usuarios borrados.
+
+    Cada cuenta se borra en un *savepoint*: primero en la BD (para comprobar que el borrado es
+    válido) y después en Keycloak. Si Keycloak falla, se revierte sólo esa cuenta y se reintenta
+    en la siguiente ejecución, sin dejar a medias las demás."""
     now = now or _now()
     due = list(
         session.scalars(
@@ -155,12 +206,72 @@ def purge_due_accounts(session: Session, now: datetime | None = None) -> list[st
             )
         )
     )
+    uses_keycloak = get_settings().auth_provider == "keycloak"
     deleted = []
     for user in due:
-        if user.keycloak_id and get_settings().auth_provider == "keycloak":
-            auth.KeycloakClient().delete_user(user.keycloak_id)
-        deleted.append(user.username)
-        # Las claves foráneas con ON DELETE CASCADE borran su contenido.
-        session.delete(user)
-    session.flush()
+        username, keycloak_id = user.username, user.keycloak_id
+        savepoint = session.begin_nested()
+        try:
+            # Los retos de la comunidad que creó se borran con él; los globales se conservan
+            # (creator_id pasa a NULL) para no quitarles los puntos a los demás.
+            session.execute(
+                delete(Challenge).where(
+                    Challenge.creator_id == user.id, Challenge.kind == ChallengeKind.USER
+                )
+            )
+            # Las claves foráneas con ON DELETE CASCADE borran el resto de su contenido.
+            session.delete(user)
+            session.flush()
+            if keycloak_id and uses_keycloak:
+                auth.KeycloakClient().delete_user(keycloak_id)
+        except Exception:
+            savepoint.rollback()
+            log.exception("No se pudo purgar la cuenta %s; se reintentará", username)
+            continue
+        savepoint.commit()
+        deleted.append(username)
     return deleted
+
+
+# --------------------------------------------------------------------------- cambio de correo
+
+
+def request_email_change(session: Session, user: User, email: str) -> str:
+    """Envía un código al correo **nuevo**. El correo sólo cambia cuando se confirma con
+    ``confirm_email_change``, así nadie puede apropiarse de un correo que no controla.
+    Devuelve el correo normalizado."""
+    email = auth.validate_new_email(session, user, email)
+    code = _issue_code(session, user, EMAIL_PURPOSE, payload=email)
+    mailer.send(
+        email,
+        "Confirma tu nuevo correo en CT Ranking",
+        [
+            f"Hola {escape(user.display_name)}, pediste usar este correo en tu cuenta de "
+            "CT Ranking.",
+            f"Tu código de confirmación es: <b>{code}</b> (válido por 15 minutos).",
+            "Si no fuiste tú, ignora este correo: tu dirección no se agregará a ninguna cuenta.",
+        ],
+    )
+    return email
+
+
+def confirm_email_change(session: Session, user: User, code: str) -> str:
+    """Valida el código enviado al correo nuevo y aplica el cambio. Devuelve el correo nuevo."""
+    record = _consume_code(session, user, EMAIL_PURPOSE, code)
+    old_email, new_email = user.email, record.payload
+    # Se vuelve a validar: otra cuenta pudo registrar ese correo mientras tanto.
+    auth.validate_new_email(session, user, new_email)
+    auth.apply_verified_email(session, user, new_email)
+    session.flush()
+    # Aviso al correo anterior. Si falla no se revierte el cambio (ya se aplicó en Keycloak).
+    with contextlib.suppress(mailer.MailError):
+        mailer.send(
+            old_email,
+            "Tu correo de CT Ranking cambió",
+            [
+                f"Hola {escape(user.display_name)}, el correo de tu cuenta ahora es "
+                f"<b>{escape(new_email)}</b>.",
+                "Si no fuiste tú, contacta al administrador de la plataforma.",
+            ],
+        )
+    return new_email

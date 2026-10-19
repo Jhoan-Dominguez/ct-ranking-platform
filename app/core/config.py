@@ -52,6 +52,11 @@ class Settings:
     google_client_secret: str
     # Secreto para firmar la cookie de sesión de st.login (OIDC).
     auth_cookie_secret: str
+    # Clave HMAC de los códigos enviados por correo. Vacía = se deriva de los secretos de Keycloak
+    # (sólo aceptable en desarrollo).
+    app_secret_key: str
+    # Horas que dura una sesión iniciada con usuario y contraseña (0 = sin límite).
+    session_ttl_hours: float
 
 
 def _database_url() -> str:
@@ -101,4 +106,6 @@ def get_settings() -> Settings:
         google_client_id=os.getenv("GOOGLE_CLIENT_ID", "").strip(),
         google_client_secret=os.getenv("GOOGLE_CLIENT_SECRET", "").strip(),
         auth_cookie_secret=os.getenv("AUTH_COOKIE_SECRET", "").strip(),
+        app_secret_key=os.getenv("APP_SECRET_KEY", "").strip(),
+        session_ttl_hours=_float("SESSION_TTL_HOURS", 12.0),
     )

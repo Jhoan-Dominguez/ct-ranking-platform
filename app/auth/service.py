@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -26,8 +27,15 @@ from app.auth.validation import (
     validate_student_email,
     validate_username,
 )
+from app.core import ratelimit
 from app.core.config import get_settings
 from app.database.models import Role, User
+
+# Proveedor local: intentos fallidos permitidos por usuario antes de bloquear un rato.
+LOCAL_MAX_FAILURES = 5
+LOCAL_LOCK_S = 300
+# Espera mínima entre dos correos de Keycloak (activación o configuración del 2FA).
+EMAIL_COOLDOWN_S = 60
 
 
 def _uses_keycloak() -> bool:
@@ -44,43 +52,58 @@ def _find_by_login(session: Session, login: str) -> User | None:
     )
 
 
-def _ensure_unique(session: Session, username: str, email: str, exclude_id: int | None = None):
+def _ensure_unique(session: Session, username: str, email: str) -> None:
     stmt = select(User).where(
         or_(func.lower(User.username) == username.lower(), User.email == email)
     )
-    if exclude_id is not None:
-        stmt = stmt.where(User.id != exclude_id)
     if session.scalar(stmt) is not None:
         raise AuthError("El usuario o el correo ya están registrados.")
 
 
-def _sync_keycloak_user(session: Session, identity: Identity) -> User:
-    user = session.scalar(select(User).where(User.keycloak_id == identity.external_id))
+def _available_username(session: Session, wanted: str) -> str:
+    """Un username libre a partir de ``wanted`` (agrega un número si ya existe)."""
+    base = re.sub(r"[^a-zA-Z0-9_.-]", "", wanted)[:30]
+    base = base if len(base) >= 3 else f"usuario{base}"
+    candidate, n = base, 2
+    while session.scalar(select(User.id).where(func.lower(User.username) == candidate.lower())):
+        suffix = str(n)
+        candidate, n = base[: 30 - len(suffix)] + suffix, n + 1
+    return candidate
+
+
+def _sync_keycloak_user(session: Session, identity: Identity, user: User | None = None) -> User:
+    """Busca (o crea) la fila local del usuario de Keycloak y sincroniza sus datos.
+
+    - Se busca por ``keycloak_id``. Si no aparece, sólo se vincula una cuenta local **sin**
+      ``keycloak_id`` y con el mismo correo verificado (p. ej. el admin que crea ``init_db``).
+      Nunca se vincula por username: con Google se deriva del correo y no prueba identidad.
+    - El rol se administra en la app (*Panel → Usuarios*). El rol ``admin`` de Keycloak sólo se
+      toma al crear la fila, así una degradación hecha desde el panel no se revierte.
+    """
     if user is None:
+        user = session.scalar(select(User).where(User.keycloak_id == identity.external_id))
+    if user is None and identity.email and identity.email_verified:
         user = session.scalar(
-            select(User).where(func.lower(User.username) == identity.username.lower())
+            select(User).where(User.keycloak_id.is_(None), User.email == identity.email.lower())
         )
     if user is None:
         # Primer login de un usuario que sólo existe en Keycloak (creado en su consola o con
         # Google). Los defaults de SQLAlchemy se aplican al insertar, así que se fijan aquí y se
         # hace flush para que el resto de la función (p. ej. is_active) vea valores reales.
         user = User(
-            username=identity.username,
-            email=identity.email or f"{identity.username}@sin-correo.local",
-            role=Role.STUDENT,
+            username=_available_username(session, identity.username),
+            email=identity.email.lower() or f"{identity.username}@sin-correo.local",
+            role=Role.ADMIN if Role.ADMIN in identity.roles else Role.STUDENT,
             is_active=True,
         )
         session.add(user)
         session.flush()
     user.keycloak_id = identity.external_id
     if identity.email:
-        user.email = identity.email
+        user.email = identity.email.lower()
     if not user.full_name:
         user.first_name, user.last_name = identity.first_name, identity.last_name
     user.email_verified = identity.email_verified
-    # Keycloak puede otorgar el rol admin; las promociones hechas desde el panel se conservan.
-    if Role.ADMIN in identity.roles:
-        user.role = Role.ADMIN
     return user
 
 
@@ -95,9 +118,19 @@ def login(session: Session, username: str, password: str, otp: str | None = None
         identity = KeycloakClient().password_login(username, password, otp)
         user = _sync_keycloak_user(session, identity)
     else:
+        key = f"local-login:{username.strip().lower()}"
+        ratelimit.check(
+            key,
+            limit=LOCAL_MAX_FAILURES,
+            window_s=LOCAL_LOCK_S,
+            message="Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo.",
+            error=AuthError,
+        )
         user = _find_by_login(session, username)
         if user is None or not check_password(password, user.password_hash):
+            ratelimit.record(key)
             raise AuthError("Usuario o contraseña incorrectos.")
+        ratelimit.reset(key)
     if not user.is_active:
         raise AuthError("La cuenta está deshabilitada. Contacta al administrador.")
     user.last_login = datetime.now(UTC)
@@ -151,21 +184,30 @@ def register(
     user = User(
         username=username, email=email, first_name=first_name, last_name=last_name, role=role
     )
-    if _uses_keycloak():
-        client = KeycloakClient()
-        user.keycloak_id = client.create_user(
-            username, email, password, first_name, last_name, verified=not require_verification
-        )
-        user.email_verified = not require_verification
-        if require_verification:
-            # Si el correo falla la cuenta no se revierte: el enlace se puede reenviar desde
-            # la pantalla de login.
-            with contextlib.suppress(AuthError):
-                client.send_verify_email(user.keycloak_id)
-    else:
+    if not _uses_keycloak():
         user.password_hash = hash_password(password)
+        session.add(user)
+        session.flush()
+        return user
+    client = KeycloakClient()
+    user.keycloak_id = client.create_user(
+        username, email, password, first_name, last_name, verified=not require_verification
+    )
+    user.email_verified = not require_verification
     session.add(user)
-    session.flush()
+    try:
+        session.flush()
+    except Exception:
+        # La fila local no se pudo crear: se deshace también el usuario de Keycloak para no
+        # dejar una cuenta huérfana que bloquee el username o el correo.
+        with contextlib.suppress(AuthError):
+            client.delete_user(user.keycloak_id)
+        raise
+    if require_verification:
+        # Si el correo falla la cuenta no se revierte: el enlace se puede reenviar desde
+        # la pantalla de login.
+        with contextlib.suppress(AuthError):
+            client.send_verify_email(user.keycloak_id)
     return user
 
 
@@ -194,11 +236,18 @@ def login_with_oidc(
         raise AuthError("La respuesta de inicio de sesión no incluye un correo.")
     if not claims.get("email_verified"):
         raise AuthError("Google no confirmó tu correo electrónico.")
-    validate_student_email(email)
     external_id = str(claims["sub"])
-    existing = session.scalar(
-        select(User).where(or_(User.keycloak_id == external_id, func.lower(User.email) == email))
-    )
+    existing = session.scalar(select(User).where(User.keycloak_id == external_id))
+    if existing is None:
+        existing = session.scalar(select(User).where(User.email == email))
+        if existing is not None and existing.keycloak_id not in (None, external_id):
+            raise AuthError(
+                "Ese correo ya está vinculado a otra cuenta de la plataforma. "
+                "Contacta al administrador."
+            )
+    # Los administradores están exentos del dominio institucional, igual que en register().
+    if existing is None or not existing.is_admin:
+        validate_student_email(email)
     if existing is None and not allow_create:
         if _uses_keycloak():
             with contextlib.suppress(AuthError):
@@ -212,9 +261,7 @@ def login_with_oidc(
         last_name=str(claims.get("family_name") or ""),
         email_verified=True,
     )
-    if existing is not None:
-        existing.keycloak_id = existing.keycloak_id or external_id
-    user = _sync_keycloak_user(session, identity)
+    user = _sync_keycloak_user(session, identity, existing)
     if not user.is_active:
         raise AuthError("La cuenta está deshabilitada. Contacta al administrador.")
     user.last_login = datetime.now(UTC)
@@ -226,6 +273,13 @@ def resend_verification(login: str) -> None:
     """Reenvía el enlace de activación. No revela si la cuenta existe."""
     if not _uses_keycloak() or not login.strip():
         return
+    ratelimit.hit(
+        f"resend:{login.strip().lower()}",
+        limit=1,
+        window_s=EMAIL_COOLDOWN_S,
+        message="Ya enviamos un enlace hace un momento. Espera un minuto antes de pedir otro.",
+        error=AuthError,
+    )
     client = KeycloakClient()
     user = client.find_user(login)
     if user and "VERIFY_EMAIL" in user.get("requiredActions", []):
@@ -260,6 +314,13 @@ def request_two_factor_setup(user: User) -> None:
     escanear con Google Authenticator, Microsoft Authenticator o FreeOTP."""
     if not _uses_keycloak() or not user.keycloak_id:
         raise AuthError("El 2FA sólo está disponible con Keycloak (AUTH_PROVIDER=keycloak).")
+    ratelimit.hit(
+        f"totp-setup:{user.id}",
+        limit=1,
+        window_s=EMAIL_COOLDOWN_S,
+        message="Ya te enviamos el enlace hace un momento. Espera un minuto antes de pedir otro.",
+        error=AuthError,
+    )
     KeycloakClient().send_actions_email(
         user.keycloak_id, ["CONFIGURE_TOTP"], TOTP_SETUP_LINK_HOURS * 3600
     )
@@ -292,14 +353,25 @@ def change_password(
         user.password_hash = hash_password(new)
 
 
-def change_email(session: Session, user: User, email: str) -> None:
+def validate_new_email(session: Session, user: User, email: str) -> str:
+    """Valida un correo nuevo para ``user`` (formato, dominio institucional salvo admins, distinto
+    del actual y libre). Devuelve el correo normalizado. No cambia nada: el cambio lo hace
+    ``accounts.request_email_change`` / ``confirm_email_change`` tras verificar el correo."""
     email = validate_email(email) if user.is_admin else validate_student_email(email)
     if email == user.email:
-        return
-    _ensure_unique(session, user.username, email, exclude_id=user.id)
+        raise AuthError("Ese ya es tu correo actual.")
+    if session.scalar(select(User.id).where(User.email == email, User.id != user.id)):
+        raise AuthError("Ese correo ya está registrado.")
+    return email
+
+
+def apply_verified_email(session: Session, user: User, email: str) -> None:
+    """Guarda un correo **cuya posesión ya se comprobó** (código enviado a ese correo) y lo marca
+    como verificado en Keycloak y en la app. No llamar sin esa verificación."""
     if _uses_keycloak() and user.keycloak_id:
         KeycloakClient().update_user(user.keycloak_id, email=email, emailVerified=True)
     user.email = email
+    user.email_verified = True
 
 
 def change_names(session: Session, user: User, first_name: str, last_name: str) -> None:

@@ -22,8 +22,8 @@ from app.auth.keycloak import Identity, KeycloakClient
 from app.auth.passwords import check_password, hash_password
 from app.auth.service import (
     TOTP_SETUP_LINK_HOURS,
+    apply_verified_email,
     begin_login,
-    change_email,
     change_names,
     change_password,
     disable_two_factor,
@@ -36,6 +36,7 @@ from app.auth.service import (
     set_active,
     two_factor_enabled,
     two_factor_supported,
+    validate_new_email,
     verify_credentials,
 )
 from app.auth.validation import (
@@ -56,8 +57,8 @@ __all__ = [
     "EmailNotVerifiedError",
     "Identity",
     "KeycloakClient",
+    "apply_verified_email",
     "begin_login",
-    "change_email",
     "change_names",
     "change_password",
     "check_password",
@@ -76,6 +77,7 @@ __all__ = [
     "two_factor_supported",
     "validate_email",
     "validate_names",
+    "validate_new_email",
     "validate_password",
     "validate_student_email",
     "validate_username",

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
+import time
 from dataclasses import dataclass, field
 
 import requests
@@ -13,6 +15,13 @@ from app.auth.errors import INVALID_LOGIN, AuthError, EmailNotVerifiedError
 from app.core.config import get_settings
 
 TIMEOUT = 10
+
+# Conexiones HTTP reutilizadas (keep-alive) y token de la cuenta de servicio en caché hasta poco
+# antes de vencer: antes cada llamada a la API de administración pedía un token nuevo.
+_http = requests.Session()
+_token_lock = threading.Lock()
+_admin_tokens: dict[tuple[str, str, str], tuple[str, float]] = {}
+TOKEN_MARGIN_S = 30
 
 
 @dataclass
@@ -27,8 +36,12 @@ class Identity:
 
 
 def _decode_jwt_payload(token: str) -> dict:
-    """Decodifica el payload del JWT. El token llega directamente de Keycloak por el canal
-    backend, por lo que no se re-verifica la firma aquí."""
+    """Decodifica el payload del JWT sin verificar la firma.
+
+    Es seguro porque el token lo entrega el endpoint de tokens de Keycloak directamente al
+    servidor (canal backend), nunca el navegador; OpenID Connect Core §3.1.3.7 permite en ese
+    caso confiar en el canal (TLS en producción) en lugar de la firma. Nunca usar esta función
+    con tokens que lleguen desde el cliente."""
     payload = token.split(".")[1]
     payload += "=" * (-len(payload) % 4)
     return json.loads(base64.urlsafe_b64decode(payload))
@@ -54,7 +67,7 @@ class KeycloakClient:
     def _post_token(self, data: dict, client: tuple[str, str] | None = None) -> requests.Response:
         client_id, client_secret = client or (self.client_id, self.client_secret)
         try:
-            return requests.post(
+            return _http.post(
                 self._token_url,
                 data={"client_id": client_id, "client_secret": client_secret, **data},
                 timeout=TIMEOUT,
@@ -182,21 +195,40 @@ class KeycloakClient:
         if resp.status_code not in (204, 404):
             resp.raise_for_status()
 
-    def _admin_headers(self) -> dict[str, str]:
-        resp = self._post_token({"grant_type": "client_credentials"})
-        if resp.status_code != 200:
-            raise AuthError("La cuenta de servicio de Keycloak no está configurada correctamente.")
-        return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    def _admin_headers(self, *, refresh: bool = False) -> dict[str, str]:
+        key = (self.base, self.realm, self.client_id)
+        with _token_lock:
+            cached = _admin_tokens.get(key)
+            if cached and not refresh and cached[1] > time.monotonic():
+                return {"Authorization": f"Bearer {cached[0]}"}
+            resp = self._post_token({"grant_type": "client_credentials"})
+            if resp.status_code != 200:
+                raise AuthError(
+                    "La cuenta de servicio de Keycloak no está configurada correctamente."
+                )
+            body = resp.json()
+            expires = time.monotonic() + max(0, body.get("expires_in", 60) - TOKEN_MARGIN_S)
+            _admin_tokens[key] = (body["access_token"], expires)
+            return {"Authorization": f"Bearer {body['access_token']}"}
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
         try:
-            return requests.request(
+            resp = _http.request(
                 method,
                 f"{self._admin_url}{path}",
                 headers=self._admin_headers(),
                 timeout=TIMEOUT,
                 **kwargs,
             )
+            if resp.status_code == 401:  # token revocado o reiniciado Keycloak: se renueva
+                resp = _http.request(
+                    method,
+                    f"{self._admin_url}{path}",
+                    headers=self._admin_headers(refresh=True),
+                    timeout=TIMEOUT,
+                    **kwargs,
+                )
+            return resp
         except requests.RequestException as exc:
             raise AuthError("No fue posible contactar Keycloak.") from exc
 
