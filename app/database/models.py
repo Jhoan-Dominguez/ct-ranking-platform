@@ -12,13 +12,16 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
+    func,
+    text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, deferred, mapped_column, relationship
 
 
 def utcnow() -> datetime:
@@ -80,6 +83,18 @@ class Difficulty(StrEnum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        # Las búsquedas usan lower(...): sin estos índices funcionales PostgreSQL recorre la tabla.
+        Index("ix_users_username_lower", func.lower(text("username"))),
+        # Alias único sin distinguir mayúsculas (el vacío significa "sin alias").
+        Index(
+            "uq_users_alias_lower",
+            func.lower(text("alias")),
+            unique=True,
+            postgresql_where=text("alias <> ''"),
+            sqlite_where=text("alias <> ''"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
@@ -93,14 +108,19 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     # Eliminación diferida: la cuenta queda oculta y se borra en deletion_scheduled_for.
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    deletion_scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deletion_scheduled_for: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
     first_name: Mapped[str] = mapped_column(String(80), default="")
     last_name: Mapped[str] = mapped_column(String(80), default="")
     alias: Mapped[str] = mapped_column(String(50), default="")
     bio: Mapped[str] = mapped_column(Text, default="")
-    avatar: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # Diferida: no se carga con cada SELECT de usuarios. La UI la lee con users.avatar_bytes()
+    # (en caché por usuario y avatar_updated_at); avatar_mime indica si hay foto.
+    avatar: Mapped[bytes | None] = deferred(mapped_column(LargeBinary))
     avatar_mime: Mapped[str | None] = mapped_column(String(50))
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     phone: Mapped[str] = mapped_column(String(30), default="")
     birth_date: Mapped[date | None] = mapped_column(Date)
     city: Mapped[str] = mapped_column(String(100), default="")
@@ -139,6 +159,10 @@ class User(Base):
     def pending_deletion(self) -> bool:
         return self.deletion_scheduled_for is not None
 
+    @property
+    def has_avatar(self) -> bool:
+        return self.avatar_mime is not None
+
 
 class Subject(Base):
     __tablename__ = "subjects"
@@ -164,6 +188,7 @@ class GradeItem(Base):
     __tablename__ = "grade_items"
     __table_args__ = (
         CheckConstraint("weight IS NULL OR (weight >= 0 AND weight <= 100)", name="ck_item_weight"),
+        CheckConstraint("grade >= 0", name="ck_item_grade"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -221,7 +246,7 @@ class PostLike(Base):
         ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -233,7 +258,12 @@ class Challenge(Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(String(20), default=ChallengeKind.USER)
-    creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # SET NULL: borrar al creador (p. ej. el admin que sembró los retos globales) no debe borrar
+    # el reto ni los puntos ganados por los demás. La purga de cuentas borra aparte los retos de
+    # la comunidad que creó el usuario.
+    creator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     difficulty: Mapped[str] = mapped_column(String(20), default=Difficulty.MEDIUM)
     points: Mapped[int] = mapped_column(Integer, default=10)
     visibility: Mapped[str] = mapped_column(String(20), default=Visibility.PUBLIC)
@@ -275,13 +305,18 @@ class Follow(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     followed_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class SupportMessage(Base):
     __tablename__ = "support_messages"
+    __table_args__ = (
+        CheckConstraint("sender_id <> recipient_id", name="ck_no_self_message"),
+        # Contador de no leídos, consultado en cada rerun.
+        Index("ix_support_messages_recipient_unread", "recipient_id", "is_read"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -305,6 +340,8 @@ class VerificationCode(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     purpose: Mapped[str] = mapped_column(String(30))
     code_hash: Mapped[str] = mapped_column(String(255))
+    # Dato asociado al código (p. ej. el correo nuevo en un cambio de correo).
+    payload: Mapped[str] = mapped_column(String(255), default="")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -319,7 +356,7 @@ class UserBlock(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     blocked_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -328,6 +365,10 @@ class UserBlock(Base):
 
 class UserReport(Base):
     __tablename__ = "user_reports"
+    __table_args__ = (
+        CheckConstraint("reporter_id <> reported_id", name="ck_no_self_report"),
+        CheckConstraint("post_id IS NULL OR comment_id IS NULL", name="ck_report_single_target"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)

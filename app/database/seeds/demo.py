@@ -1,11 +1,11 @@
 """Datos de demostración (``make seed-demo``). Es idempotente: si los usuarios ya existen no hace
 nada. Todos los usuarios demo usan la contraseña DEMO_PASSWORD.
 
-Los estudiantes cursan Ingeniería de Software (pensum de ``app/data/pensums.py``) y están en
-distintos niveles: recién ingresados, iniciando, a mitad de carrera y a punto de terminar. Las
-materias de semestres anteriores tienen notas y quedan aprobadas o reprobadas (las reprobadas se
-repiten en el semestre siguiente), las del semestre actual están en curso con notas parciales y las
-futuras quedan pendientes.
+Los estudiantes cursan Ingeniería de Software (pensum de ``app/database/seeds/pensums.py``) y
+están en distintos niveles: recién ingresados, iniciando, a mitad de carrera y a punto de
+terminar. Las materias de semestres anteriores tienen notas y quedan aprobadas o reprobadas (las
+reprobadas se repiten en el semestre siguiente), las del semestre actual están en curso con notas
+parciales y las futuras quedan pendientes.
 """
 
 from __future__ import annotations

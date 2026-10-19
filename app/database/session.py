@@ -26,9 +26,16 @@ def get_engine() -> Engine:
     return _engine or configure()
 
 
+class CommitBeforeRaiseError(Exception):
+    """Mezcla para errores de dominio que deben **conservar** los cambios ya hechos en la
+    transacción (p. ej. sumar un intento fallido antes de rechazar un código). Con cualquier otra
+    excepción, ``session_scope`` hace rollback."""
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
-    """Sesión transaccional: hace commit al salir y rollback si ocurre una excepción."""
+    """Sesión transaccional: hace commit al salir y rollback si ocurre una excepción (salvo
+    las que heredan de ``CommitBeforeRaiseError``, que hacen commit y se vuelven a lanzar)."""
     if _session_factory is None:
         configure()
     assert _session_factory is not None
@@ -36,6 +43,9 @@ def session_scope() -> Iterator[Session]:
     try:
         yield session
         session.commit()
+    except CommitBeforeRaiseError:
+        session.commit()
+        raise
     except Exception:
         session.rollback()
         raise
