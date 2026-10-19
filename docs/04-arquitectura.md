@@ -124,12 +124,12 @@ ct-ranking-platform/
 │       │   └── sidebar.py          #     Menú lateral que se expande con el mouse
 │       └── assets/
 │           └── sidebar_hover.js    #   JavaScript del menú lateral
-├── container/                      # Contenedores (Docker y Podman)
-│   ├── Dockerfile                  #   Imagen de la app (python:3.13-slim)
-│   ├── compose.yaml                #   db, keycloak, mailpit, setup y app
-│   ├── compose.dev.yaml            #   make dev: monta el código y recarga al guardar
-│   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
-│   └── postgres/01-create-keycloak-db.sql
+├── container/                      # Contenedores (ver container/README.md)
+│   ├── common/                     #   Compartido por ambos motores
+│   │   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
+│   │   └── postgres/01-create-keycloak-db.sql
+│   ├── docker/                     #   Dockerfile · compose.yaml · compose.dev.yaml
+│   └── podman/                     #   Containerfile · compose.yaml · compose.dev.yaml
 ├── scripts/                        # Operación (se ejecutan en la imagen con `python -m scripts.<nombre>`)
 │   ├── wait_for_services.py        #   Espera a PostgreSQL y Keycloak
 │   ├── configure_keycloak.py       #   SMTP, URLs de la app y proveedor Google en el realm

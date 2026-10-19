@@ -35,9 +35,11 @@
 | «No existe una cuenta en CT Ranking para …» al usar Google | Se usó «Iniciar sesión con Google» sin tener cuenta. | Pulsa **Crear cuenta con Google** (o usa la pestaña *Crear cuenta*). |
 | Error al pulsar un botón de Google tras cambiar `.env` | La app en ejecución todavía tiene la configuración anterior de `st.login`. | `make run`: recrea el contenedor de la app, que regenera `secrets.toml` al arrancar. |
 | Tras volver de Google: error de *issuer* o de token | `KEYCLOAK_PUBLIC_URL` no coincide con la URL con la que el navegador abre Keycloak. | Ajusta `KEYCLOAK_PUBLIC_URL` (y `KEYCLOAK_PORT`) en `.env` y repite `make up`. |
-| `make up` con Podman: *short-name … did not resolve* | Imagen sin nombre completo. | Las de `container/compose.yaml` ya lo tienen; si agregas una, usa `docker.io/...`. |
+| `make up` con Podman: *short-name … did not resolve* | Imagen sin nombre completo. | Las de `container/podman/compose.yaml` ya lo tienen; si agregas una, usa `docker.io/...`. |
 | Con Podman en Fedora/RHEL: *Permission denied* al leer `/docker-entrypoint-initdb.d` o el realm | SELinux bloquea la carpeta montada. | Los montajes llevan `z`; si agregas uno, añade `:z`. |
-| Con Podman, `make up` se queda esperando a `db` | `podman-compose` antiguo o sistema sin systemd: los healthchecks no se ejecutan. | Actualiza `podman-compose` (≥ 1.1) o usa `docker-compose` como provider de `podman compose`. |
+| `podman compose`: *looking up compose provider failed* | No hay provider de compose instalado. | Instala `podman-compose` ≥ 1.1 (ver [`container/README.md`](../container/README.md#probar-con-podman)). |
+| Con Podman, Keycloak se reinicia una o dos veces al arrancar | Arrancó antes que PostgreSQL (la versión de Podman no espera al healthcheck). | Normal: se recupera solo y `setup` espera a que esté listo. |
+| Al pasar de Docker a Podman la base de datos está vacía | Cada motor tiene sus propios volúmenes. | Respalda con un motor y restaura con el otro ([Despliegue](03-despliegue-y-operacion.md#respaldo-y-restauración)). |
 | Cambié código y la app no lo refleja | La app corre desde la imagen. | `make run` (reconstruye) o trabaja con `make dev` (monta el código y recarga al guardar). |
 | Google muestra `redirect_uri_mismatch` | La URI registrada en Google Cloud no coincide con la del *broker* de Keycloak. | Registra `<KEYCLOAK_URL>/realms/ct-ranking/broker/google/endpoint` en el cliente OAuth. |
 | «Debes usar tu correo institucional…» tras volver de Google | Se eligió una cuenta que no es `@estudiantes.areandina.edu.co`. | Pulsa «Usar otra cuenta de Google» y elige la cuenta institucional. |
@@ -51,7 +53,7 @@
 make ps                                            # estado de los contenedores
 make logs                                          # logs de todos los contenedores
 make shell                                         # bash dentro de la imagen de la app
-COMPOSE="docker compose --env-file .env -f container/compose.yaml"   # o podman compose
+COMPOSE="docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml"   # o podman/
 $COMPOSE exec db psql -U ctranking -d ctranking -c '\dt'      # tablas de la app
 $COMPOSE exec db psql -U ctranking -d ctranking \
   -c "select username, role, is_active, keycloak_id is not null as kc from users;"

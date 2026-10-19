@@ -20,8 +20,8 @@ entre sí. Un panel de administrador permite hacer seguimiento a un estudiante o
           │ BD "ctranking"            ┌────────────────────────────┐
           └─────────────────────────► │ PostgreSQL 16              │
                                       └────────────────────────────┘
-   Todo corre en contenedores (container/compose.yaml, Docker o Podman).
-   La app usa su propia imagen: container/Dockerfile (python:3.13-slim).
+   Todo corre en contenedores: container/docker/ o container/podman/.
+   La app usa su propia imagen (python:3.13-slim).
 ```
 
 | Capa | Carpeta | Responsabilidad |
@@ -47,7 +47,7 @@ intercambiables con `AUTH_PROVIDER`:
   - El login usa el flujo *Direct Access Grants* contra el realm `ct-ranking`.
   - El registro y los cambios de contraseña, correo y nombre usan la API de administración de
     Keycloak, con la cuenta de servicio del cliente `ct-ranking-app`.
-  - El realm se importa automáticamente desde `container/keycloak/ct-ranking-realm.json`. Ese archivo
+  - El realm se importa automáticamente desde `container/common/keycloak/ct-ranking-realm.json`. Ese archivo
     define el cliente, los roles `student`/`admin` y el usuario administrador.
   - La BD de la app guarda el perfil y el `keycloak_id`, nunca la contraseña.
   - Si Keycloak entrega el rol `admin`, el usuario se vuelve administrador. Las promociones hechas
@@ -235,7 +235,8 @@ intercambiables con `AUTH_PROVIDER`:
   un estudiante en riesgo.
 - **Pruebas automatizadas** con pytest sobre SQLite en memoria (`make test`), incluidas las
   pruebas de regresión de la auditoría (`tests/test_audit_validation.py`).
-- **Todo en contenedores, con Docker o Podman** (`container/`): la app tiene su propia imagen
+- **Todo en contenedores, con Docker o Podman** (`container/docker/` y `container/podman/`, con
+  lo compartido en `container/common/`): la app tiene su propia imagen
   (`python:3.13-slim`, usuario sin privilegios) y `make up` construye, configura y levanta todo
   sin entorno virtual. Imágenes con nombre completo, montajes con etiqueta SELinux y sin escrituras
   en carpetas del host, para que funcione igual con Podman *rootless*. `make dev` monta el código
@@ -282,7 +283,8 @@ rendimiento. Lo corregido:
 ## 4. Cómo ejecutarlo
 
 Requisitos: Docker (con `docker compose`) **o** Podman (con `podman compose`) y `make`. La app
-corre en su propia imagen (`container/Dockerfile`, basada en `python:3.13-slim`); Python local
+corre en su propia imagen (`container/docker/Dockerfile` o `container/podman/Containerfile`,
+basada en `python:3.13-slim`); Python local
 sólo hace falta para las pruebas y el lint.
 
 ```bash

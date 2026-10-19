@@ -2,7 +2,8 @@
 
 ## Topología
 
-Todo corre en contenedores, definidos en `container/compose.yaml`. Funciona igual con **Docker**
+Todo corre en contenedores, definidos en `container/docker/compose.yaml` o
+`container/podman/compose.yaml` según el motor. Funciona igual con **Docker**
 y con **Podman** (ver [Docker y Podman](#docker-y-podman)).
 
 ```mermaid
@@ -23,7 +24,7 @@ flowchart LR
 ```
 
 - La **aplicación Streamlit** corre en el contenedor `app`, construido con
-  `container/Dockerfile` sobre `python:3.13-slim`. El código va dentro de la imagen; `.env` se
+  `container/docker/Dockerfile` (o `container/podman/Containerfile`) sobre `python:3.13-slim`. El código va dentro de la imagen; `.env` se
   pasa al arrancar (`env_file`) y nunca se copia a la imagen (`.dockerignore`).
 - Dentro de la red de compose (`ct-ranking_default`) los servicios se llaman por su nombre:
   compose fija para la app `POSTGRES_HOST=db`, `POSTGRES_PORT=5432` y
@@ -33,23 +34,26 @@ flowchart LR
   tokens, y `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` deja que la app use la red interna para las
   llamadas servidor a servidor.
 - Keycloak usa la **misma instancia** de PostgreSQL pero una **base de datos distinta**
-  (`keycloak`). El script `container/postgres/01-create-keycloak-db.sql` la crea al inicializar
+  (`keycloak`). El script `container/common/postgres/01-create-keycloak-db.sql` la crea al inicializar
   el volumen.
 
 ## Archivos de `container/`
 
+Cada motor tiene su carpeta y lo compartido está en `common/` (detalle en
+[`container/README.md`](../container/README.md)):
+
 | Archivo | Para qué |
 |---------|----------|
-| `Dockerfile` | Imagen de la app: instala `requirements.txt`, copia `app/`, `scripts/` y `.streamlit/config.toml`, y corre como el usuario sin privilegios `app` (uid 10001). Al arrancar genera `secrets.toml` y ejecuta Streamlit. |
-| `compose.yaml` | Servicios `db`, `keycloak`, `mailpit`, `setup` y `app`. |
-| `compose.dev.yaml` | Se suma en `make dev`: monta `app/` y `scripts/` del host (sólo lectura) y activa la recarga al guardar. |
-| `keycloak/ct-ranking-realm.json` | Realm que Keycloak importa en el primer arranque. |
-| `postgres/01-create-keycloak-db.sql` | Crea la base de datos de Keycloak. |
+| `docker/Dockerfile` · `podman/Containerfile` | Imagen de la app (mismo contenido): instala `requirements.txt`, copia `app/`, `scripts/` y `.streamlit/config.toml`, y corre como el usuario sin privilegios `app` (uid 10001). Al arrancar genera `secrets.toml` y ejecuta Streamlit. |
+| `docker/compose.yaml` · `podman/compose.yaml` | Servicios `db`, `keycloak`, `mailpit`, `setup` y `app`. Difieren sólo en lo indicado en [Docker y Podman](#docker-y-podman). |
+| `docker/compose.dev.yaml` · `podman/compose.dev.yaml` | Se suman en `make dev`: montan `app/` y `scripts/` del host (sólo lectura) y activan la recarga al guardar. |
+| `common/keycloak/ct-ranking-realm.json` | Realm que Keycloak importa en el primer arranque. |
+| `common/postgres/01-create-keycloak-db.sql` | Crea la base de datos de Keycloak. |
 
-El contexto de compilación es la raíz del repositorio, así que el `.dockerignore` está en la raíz
-(Docker y Podman lo leen ahí).
+Si se cambia el archivo de un motor, hay que cambiar el del otro. El contexto de compilación es la
+raíz del repositorio, así que el `.dockerignore` está en la raíz (Docker y Podman lo leen ahí).
 
-## Servicios de `container/compose.yaml`
+## Servicios de compose
 
 ### `db`: PostgreSQL
 
@@ -58,7 +62,7 @@ El contexto de compilación es la raíz del repositorio, así que el `.dockerign
 | Imagen | `docker.io/library/postgres:16-alpine` |
 | Puerto | `${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432` |
 | Volumen | `pgdata` → `/var/lib/postgresql/data` (persistente) |
-| Init scripts | `./postgres` → `/docker-entrypoint-initdb.d` (sólo se ejecutan con el volumen vacío) |
+| Init scripts | `../common/postgres` → `/docker-entrypoint-initdb.d` (sólo se ejecutan con el volumen vacío) |
 | Healthcheck | `pg_isready` cada 5 s, 20 reintentos |
 | Bases de datos | `ctranking` (app) y `keycloak` (Keycloak) |
 
@@ -71,9 +75,9 @@ El contexto de compilación es la raíz del repositorio, así que el `.dockerign
 | Puerto | `${BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080` |
 | BD | `KC_DB=postgres`, `jdbc:postgresql://db:5432/keycloak` |
 | URL pública | `KC_HOSTNAME=${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}`, `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` |
-| Import | `./keycloak` → `/opt/keycloak/data/import` (realm `ct-ranking-realm.json`) |
+| Import | `../common/keycloak` → `/opt/keycloak/data/import` (realm `ct-ranking-realm.json`) |
 | Admin de consola | `KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD` ← `KEYCLOAK_ADMIN[_PASSWORD]` |
-| Depende de | `db` en estado *healthy* |
+| Depende de | `db` en estado *healthy* (Docker) o arrancado (Podman; si Keycloak arranca antes que PostgreSQL, se reinicia solo) |
 
 Durante la importación, Keycloak reemplaza los *placeholders* `${KEYCLOAK_CLIENT_SECRET}`,
 `${APP_ADMIN_USERNAME}`, `${APP_ADMIN_EMAIL}` y `${APP_ADMIN_PASSWORD}` del JSON del realm con
@@ -102,7 +106,7 @@ Es idempotente: se ejecuta en cada `make up`.
 
 | Propiedad | Valor |
 |-----------|-------|
-| Imagen | `localhost/ct-ranking-app:latest` (construida desde `container/Dockerfile`) |
+| Imagen | `localhost/ct-ranking-app:latest` (construida desde el `Dockerfile`/`Containerfile` del motor) |
 | Puerto | `${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8501}:8501` |
 | Volumen | `streamlit` → `/home/app/.streamlit`: guarda `secrets.toml` (secreto de la cookie de `st.login`) entre reinicios |
 | Arranque | `python -m scripts.write_streamlit_secrets` y luego `streamlit run app/main.py` |
@@ -110,8 +114,10 @@ Es idempotente: se ejecuta en cada `make up`.
 
 ## Comandos de operación (`make help`)
 
-El Makefile usa `docker` si está instalado y si no `podman`. Para forzar uno:
-`make up ENGINE=podman`. Todos los comandos de la app se ejecutan dentro de su imagen; `.venv` sólo
+El Makefile usa `docker` si está instalado y si no `podman`, y toma los archivos de
+`container/$ENGINE/`. Para forzar uno: `make up ENGINE=podman` (todos los comandos aceptan
+`ENGINE`). Con Podman, `PODMAN_COMPOSE=podman-compose` usa el provider directamente en lugar de
+`podman compose`. `make engine` muestra qué motor, compose y archivos se usarán. Todos los comandos de la app se ejecutan dentro de su imagen; `.venv` sólo
 se usa para las herramientas de calidad (`make test`, `make lint`, `make format`).
 
 | Comando | Qué hace |
@@ -119,7 +125,9 @@ se usa para las herramientas de calidad (`make test`, `make lint`, `make format`
 | `make up` | Construye la imagen de la app, levanta `db`, `keycloak` y `mailpit`, ejecuta `setup` (espera, configura Keycloak, crea tablas y datos base) y arranca la app en http://localhost:8501. |
 | `make dev` | Como `up`, pero monta el código del host en la app (recarga al guardar) y sigue sus logs. |
 | `make run` | Reconstruye la imagen y reinicia sólo la app (tras cambiar código o `requirements.txt`). |
-| `make build` | Sólo construye la imagen de la app. |
+| `make build` | Sólo construye la imagen de la app (con compose). |
+| `make image` | Construye la imagen con `docker build` / `podman build`, sin compose. |
+| `make engine` | Muestra el motor, el comando de compose y los archivos que se usarán. |
 | `make down` | Detiene y elimina los contenedores. **Conserva** los volúmenes (datos). |
 | `make restart` | `down` + `up`. |
 | `make logs` | Sigue los logs de los contenedores. |
@@ -142,14 +150,14 @@ se usa para las herramientas de calidad (`make test`, `make lint`, `make format`
 Sin `make`, los mismos comandos se pueden ejecutar desde la raíz del repositorio:
 
 ```bash
-docker compose --env-file .env -f container/compose.yaml up -d db keycloak mailpit
-docker compose --env-file .env -f container/compose.yaml --profile setup run --rm setup
-docker compose --env-file .env -f container/compose.yaml up -d --build app
-# Con Podman: lo mismo cambiando "docker" por "podman".
+docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml up -d db keycloak mailpit
+docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml --profile setup run --rm setup
+docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml up -d --build app
+# Con Podman: "podman compose" y container/podman/compose.yaml.
 ```
 
 `--env-file .env` es necesario porque compose busca `.env` junto al archivo de compose
-(`container/`), no en la raíz.
+(`container/<motor>/`), no en la raíz.
 
 ## Ciclo de vida típico
 
@@ -167,13 +175,23 @@ make destroy && make up && make seed-demo
 
 ## Docker y Podman
 
-`make` funciona con los dos. Requisitos:
+`make` funciona con los dos (`ENGINE=docker|podman`). Requisitos:
 
 - **Docker:** Docker Engine con el plugin `docker compose` (v2).
 - **Podman:** Podman 4.7 o superior (trae `podman compose`) y un *provider* de compose instalado:
   `podman-compose` 1.1 o superior, o `docker-compose`. `podman compose` delega en él.
 
-Limitaciones y cómo se resolvieron:
+Pasos para probar con Podman: [`container/README.md`](../container/README.md#probar-con-podman).
+
+Diferencias entre `container/docker/` y `container/podman/`:
+
+| Tema | Docker | Podman | Por qué |
+|------|--------|--------|---------|
+| Archivo de imagen | `Dockerfile` | `Containerfile` | Nombre nativo de Podman/Buildah (mismo contenido). |
+| Pods | — | `x-podman: in_pod: false` | podman-compose mete los servicios en un pod por defecto; fuera de él, `compose run` y los puertos funcionan igual que en Docker. |
+| Orden de arranque | `depends_on` con `condition: service_healthy` | `depends_on` simple | Sin systemd Podman no ejecuta los healthchecks periódicos y la espera no terminaría. |
+
+Limitaciones de Podman y cómo se resolvieron (las reglas aplican a los dos motores):
 
 | Limitación | Solución en el proyecto |
 |------------|-------------------------|
@@ -182,14 +200,15 @@ Limitaciones y cómo se resolvieron:
 | Con Podman *rootless* los archivos montados del host cambian de dueño dentro del contenedor; un usuario no root no puede escribirlos. | La app nunca escribe en carpetas del host: `secrets.toml` va a un volumen y los montajes de `make dev` son de sólo lectura. |
 | Compose lee `.env` de la carpeta del archivo de compose. | El Makefile pasa `--env-file .env`. |
 | Podman ignora `HEALTHCHECK` en el `Dockerfile` (formato de imagen OCI). | El healthcheck de la app está en `compose.yaml`. |
-| `podman-compose` antiguo no entiende `depends_on: condition: service_healthy`, y sin systemd Podman no ejecuta los healthchecks periódicos. | Usar `podman-compose` ≥ 1.1 en un sistema con systemd. `setup` espera a PostgreSQL y Keycloak por su cuenta (`wait_for_services`), así que la configuración no depende de los healthchecks. |
+| `podman-compose` antiguo no entiende `depends_on: condition: service_healthy`, y sin systemd Podman no ejecuta los healthchecks periódicos. | La versión de Podman no usa esas condiciones. `setup` espera a PostgreSQL y Keycloak por su cuenta (`wait_for_services`). Usar `podman-compose` ≥ 1.1. |
 | Docker Desktop y `podman machine` (macOS/Windows) corren en una VM: los cambios de archivos montados no siempre generan eventos. | `make dev` usa `STREAMLIT_SERVER_FILE_WATCHER_TYPE=poll`. |
 | Docker y Podman guardan imágenes y volúmenes por separado. | Al cambiar de motor se parte de cero: los datos de uno no aparecen en el otro. Respalda antes (ver abajo). |
 
 ## Consolas y accesos
 
-En los comandos, `$COMPOSE` es `docker compose --env-file .env -f container/compose.yaml` (o
-`podman compose ...`).
+En los comandos, `$COMPOSE` es
+`docker compose -p ct-ranking --env-file .env -f container/docker/compose.yaml` (o
+`podman compose -p ct-ranking --env-file .env -f container/podman/compose.yaml`).
 
 
 | Recurso | URL / comando | Credenciales por defecto |
@@ -233,7 +252,7 @@ El proyecto está configurado para desarrollo local. Para publicarlo:
    - Los puertos de los contenedores se publican sólo en `127.0.0.1` (`BIND_ADDRESS`). Mailpit no tiene
      contraseña y muestra todos los códigos y enlaces: nunca debe quedar expuesto.
 3. **Imagen de la app.**
-   - La imagen de `container/Dockerfile` ya sirve para producción. Publicarla en un registro y
+   - La imagen de `container/docker/Dockerfile` (o `container/podman/Containerfile`) ya sirve para producción. Publicarla en un registro y
      no usar `compose.dev.yaml` (monta el código del host).
 4. **Proxy inverso.**
    - Usar Nginx o Traefik con HTTPS delante de Streamlit y de Keycloak.

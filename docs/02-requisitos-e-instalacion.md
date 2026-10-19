@@ -4,7 +4,7 @@
 
 | Herramienta | Versión probada | Para qué se usa |
 |-------------|-----------------|-----------------|
-| **Docker** (Engine + plugin `docker compose`) **o Podman** (4.7+ con `podman-compose` 1.1+ o `docker-compose`) | Docker 29.x, Compose 5.6 | Construir la imagen de la app y ejecutar todos los servicios (`container/compose.yaml`). Ver [Docker y Podman](03-despliegue-y-operacion.md#docker-y-podman). |
+| **Docker** (Engine + plugin `docker compose`) **o Podman** (4.7+ con `podman-compose` 1.1+ o `docker-compose`) | Docker 29.x, Compose 5.6 | Construir la imagen de la app y ejecutar todos los servicios (`container/docker/` o `container/podman/`). Ver [Docker y Podman](03-despliegue-y-operacion.md#docker-y-podman). |
 | **GNU Make** | 4.x | Atajos de creación, arranque y parada (`Makefile`). |
 | **Git** | cualquiera reciente | Control de versiones y hooks de pre-commit. |
 | **Python** (opcional) | 3.13 (mínimo 3.12) | Sólo para las herramientas de calidad en `.venv`: pruebas, lint y formato. La app usa el Python de su imagen (`python:3.13-slim`). |
@@ -33,7 +33,7 @@ Están fijadas (versión exacta) en dos archivos:
 
 | Archivo | Paquetes | Uso |
 |---------|----------|-----|
-| `requirements.txt` | `streamlit`, `SQLAlchemy`, `psycopg[binary]`, `bcrypt`, `requests`, `python-dotenv`, `pandas`, `plotly`, `pillow`, `authlib`, `httpx` | Ejecución de la aplicación. Se instala **en la imagen** (`container/Dockerfile`). `authlib` y `httpx` los usa `st.login` (inicio de sesión con Google). |
+| `requirements.txt` | `streamlit`, `SQLAlchemy`, `psycopg[binary]`, `bcrypt`, `requests`, `python-dotenv`, `pandas`, `plotly`, `pillow`, `authlib`, `httpx` | Ejecución de la aplicación. Se instala **en la imagen** (`container/docker/Dockerfile` o `container/podman/Containerfile`). `authlib` y `httpx` los usa `st.login` (inicio de sesión con Google). |
 | `requirements-dev.txt` | Lo anterior + `pytest`, `ruff`, `isort`, `pre-commit` | Pruebas y calidad de código, en `.venv` (`make install`). |
 
 ## Instalación paso a paso
@@ -52,14 +52,15 @@ make seed-demo
 make create
 ```
 
-Para usar Podman aunque Docker esté instalado: `make up ENGINE=podman`.
+Para usar Podman aunque Docker esté instalado: `make up ENGINE=podman` (pasos en
+[`container/README.md`](../container/README.md#probar-con-podman)).
 
 Detalle de lo que hace cada paso:
 
 1. **`make up`** ejecuta:
    - `make env`: copia `.env.example` a `.env` si `.env` no existe, y avisa si `SMTP_HOST` apunta
      a `localhost` (dentro del contenedor no llega a Mailpit).
-   - `compose build app`: construye la imagen de la app desde `container/Dockerfile`.
+   - `compose build app`: construye la imagen de la app desde `container/<motor>/`.
    - `compose up -d db keycloak mailpit`: levanta los servicios.
    - `compose --profile setup run --rm setup`, que dentro de la imagen de la app ejecuta:
      - `python -m scripts.wait_for_services`: hace polling hasta que PostgreSQL acepta conexiones

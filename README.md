@@ -233,8 +233,8 @@ ct-ranking-platform/
 │       ├── components/         # session · actions · formatting · widgets · charts
 │       │                       #   rankings · moderation · sidebar
 │       └── assets/             # sidebar_hover.js
-├── container/                  # Dockerfile · compose.yaml · compose.dev.yaml
-│                               #   keycloak/ct-ranking-realm.json · postgres/ (BD de Keycloak)
+├── container/                  # docker/ (Dockerfile, compose) · podman/ (Containerfile, compose)
+│                               #   common/ (realm de Keycloak, BD de Keycloak) · README.md
 ├── scripts/                    # wait_for_services · configure_keycloak
 │                               #   write_streamlit_secrets · migrate_student_emails
 ├── tests/                      # Una prueba por dominio (SQLite en memoria)

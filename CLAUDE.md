@@ -15,7 +15,7 @@ The app and its services run in containers (`container/`), with Docker or Podman
 
 ```bash
 make up           # build app image, start db/keycloak/mailpit, run `setup` (wait, configure Keycloak, init_db), start app on :8501
-make dev          # like up, but mounts app/ and scripts/ read-only and reloads on save (container/compose.dev.yaml)
+make dev          # like up, but mounts app/ and scripts/ read-only and reloads on save (container/<engine>/compose.dev.yaml)
 make run          # rebuild the image and restart only the app container
 make shell        # bash in a fresh app container; make logs / make ps
 make init-db      # create tables + base data only (what setup does last)
@@ -36,8 +36,10 @@ make format       # isort + ruff check --fix + ruff format on app, tests, script
 - `pre-commit run --all-files` only checks git-tracked files. For untracked files, use `pre-commit run --files <paths>`.
 - Ports: Keycloak is exposed on **8180** (8080 is taken on this machine), Postgres on 5432, the app on 8501, and Mailpit on 1025 (SMTP) and 8025 (web UI, where all dev emails land). All are published on `127.0.0.1` only (`BIND_ADDRESS`) and can be changed in `.env`.
 - **Containers** (`container/`, details in `docs/03-despliegue-y-operacion.md`):
-  - `ENGINE` defaults to docker if installed, else podman (`make up ENGINE=podman`). `COMPOSE` is `$(ENGINE) compose --env-file .env -f container/compose.yaml`; `--env-file` is needed because compose otherwise looks for `.env` next to the compose file.
-  - The app image (`container/Dockerfile`, `python:3.13-slim`, user `app` uid 10001) bakes in the code; `.env` comes in via `env_file` and is excluded by the root `.dockerignore`. Code changes need `make run` unless using `make dev`.
+  - One folder per engine: `container/docker/` (`Dockerfile`, `compose.yaml`, `compose.dev.yaml`) and `container/podman/` (`Containerfile`, same compose files); shared realm and SQL in `container/common/`. **Keep both in sync**: the image files are identical, and the Podman compose only adds `x-podman: in_pod: false` and drops `condition: service_healthy` (healthchecks don't run without systemd). See `container/README.md`.
+  - `ENGINE` (docker|podman) defaults to docker if installed, else podman; every target accepts it (`make up ENGINE=podman`, `make engine` shows the choice). `COMPOSE` is `<compose cmd> -p ct-ranking --env-file .env -f container/$(ENGINE)/compose.yaml`; `PODMAN_COMPOSE=podman-compose` bypasses the `podman compose` wrapper. `--env-file` is needed because compose otherwise looks for `.env` next to the compose file.
+  - Podman can be dry-run checked without Podman: `podman-compose --dry-run --verbose ... up -d` with a stub `podman` on `PATH` that answers `version` and returns `[]` for JSON queries.
+  - The app image (`python:3.13-slim`, user `app` uid 10001) bakes in the code; `.env` comes in via `env_file` and is excluded by the root `.dockerignore`. Code changes need `make run` unless using `make dev`.
   - Compose overrides `POSTGRES_HOST=db`, `POSTGRES_PORT=5432`, `KEYCLOAK_URL=http://keycloak:8080` and empties `DATABASE_URL` for the app; `.env` values with `localhost` only apply on the host. `SMTP_HOST` is *not* overridden and must be `mailpit` (Makefile warns on `localhost`).
   - The browser still reaches Keycloak at `KEYCLOAK_PUBLIC_URL` (`KC_HOSTNAME`, issuer of tokens). `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` lets the app use the internal URL; this keeps `st.login` working when the metadata URL is internal.
   - `secrets.toml` is written at container start to `STREAMLIT_SECRETS_FILE=/home/app/.streamlit/secrets.toml` (named volume `streamlit`; Streamlit reads `~/.streamlit/secrets.toml` too).
@@ -80,7 +82,7 @@ Package map:
 - **Navigation:** `app/main.py` builds `st.navigation` from callables (`ui.pages.<x>.render`). Unauthenticated users only get the login page. Accounts pending deletion only get `ui/pages/account_pending.py`. The admin page is added only for `role == "admin"`. Detail sub-views use `st.session_state` keys (`post_id`, `profile_id`, `challenge_id`).
 - **Auth** (`app/auth/service.py`) is switched by `AUTH_PROVIDER`:
   - **`keycloak`**: login uses ROPC (`grant_type=password`) on the confidential client `ct-ranking-app`. Registration and password/email/name/enable changes go through the Keycloak Admin API using that client's service account (`manage-users`).
-    - The realm is imported from `container/keycloak/ct-ranking-realm.json`, which uses `${ENV}` placeholders filled from the compose env.
+    - The realm is imported from `container/common/keycloak/ct-ranking-realm.json`, which uses `${ENV}` placeholders filled from the compose env.
     - Keycloak 26's user profile requires firstName and lastName, or the password grant fails with "Account is not fully set up". This is why `User` has `first_name`/`last_name` and registration requires both.
     - `update_user` does GET then a full PUT on purpose.
     - `KeycloakClient` shares a `requests.Session` and caches the service-account token until shortly before it expires.
