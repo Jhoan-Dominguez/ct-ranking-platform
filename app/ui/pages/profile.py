@@ -11,10 +11,11 @@ from app import auth
 from app.auth import accounts
 from app.core.config import get_settings
 from app.database.session import session_scope
-from app.services import social, users
+from app.services import moderation, social, users
 from app.ui.components import actions, formatting, session, widgets
 
 CODE_SENT = "_deletion_code_sent"
+EMAIL_PENDING = "_email_change_pending"
 
 
 def _otp_input(two_factor: bool, key: str) -> str:
@@ -25,18 +26,7 @@ def _otp_input(two_factor: bool, key: str) -> str:
 
 def _security_tab(user, two_factor: bool) -> None:
     st.text_input("Usuario", user.username, disabled=True)
-    with st.form("email"):
-        if user.is_admin:
-            email_value = st.text_input("Correo electrónico", user.email)
-        else:
-            email_value = widgets.institutional_email_input("Correo institucional", user.email)
-        if st.form_submit_button("Actualizar correo"):
-
-            def _change(s):
-                email = email_value if user.is_admin else auth.student_email(email_value)
-                auth.change_email(s, s.merge(user), email)
-
-            actions.run_action(_change, "Correo actualizado")
+    _email_change(user)
     with st.form("password", clear_on_submit=True):
         st.markdown("**Cambiar contraseña**")
         current_pwd = st.text_input("Contraseña actual", type="password")
@@ -84,6 +74,41 @@ def _security_tab(user, two_factor: bool) -> None:
             lambda _s: auth.request_two_factor_setup(user),
             f"Te enviamos el enlace a {user.email} (válido por {auth.TOTP_SETUP_LINK_HOURS} horas)",
         )
+
+
+def _email_change(user) -> None:
+    """Cambio de correo en dos pasos: el correo sólo cambia tras escribir el código que se envía a
+    la dirección nueva (así nadie puede quedarse con un correo que no controla)."""
+    pending = st.session_state.get(EMAIL_PENDING)
+    if not pending:
+        with st.form("email"):
+            if user.is_admin:
+                email_value = st.text_input("Correo electrónico", user.email)
+            else:
+                email_value = widgets.institutional_email_input("Correo institucional", user.email)
+            if st.form_submit_button("Cambiar correo"):
+
+                def _request(s):
+                    email = email_value if user.is_admin else auth.student_email(email_value)
+                    st.session_state[EMAIL_PENDING] = accounts.request_email_change(
+                        s, s.merge(user), email
+                    )
+
+                actions.run_action(_request, "Te enviamos un código al correo nuevo")
+        return
+    st.info(f"Escribe el código que enviamos a **{pending}** para confirmar el cambio.", icon="📧")
+    with st.form("email_confirm", clear_on_submit=True):
+        code = st.text_input("Código de 6 dígitos", max_chars=6)
+        if st.form_submit_button("Confirmar correo", type="primary"):
+
+            def _confirm(s):
+                accounts.confirm_email_change(s, s.merge(user), code)
+                st.session_state.pop(EMAIL_PENDING, None)
+
+            actions.run_action(_confirm, "Correo actualizado")
+    if st.button("Cancelar cambio de correo", icon="↩️"):
+        st.session_state.pop(EMAIL_PENDING, None)
+        st.rerun()
 
 
 def _delete_tab(user, two_factor: bool) -> None:
@@ -151,7 +176,7 @@ def render() -> None:
         if upload is not None and st.button("Guardar foto", type="primary"):
             raw = upload.getvalue()
             actions.run_action(lambda s: users.set_avatar(s.merge(user), raw), "Foto actualizada")
-        if user.avatar and st.button("Quitar foto"):
+        if user.has_avatar and st.button("Quitar foto"):
             actions.run_action(lambda s: users.set_avatar(s.merge(user), None), "Foto eliminada")
         st.caption(f"Miembro desde {formatting.fmt_dt(user.created_at, with_time=False)}")
         st.caption(f"Rol: {'administrador' if user.is_admin else 'estudiante'}")
@@ -231,5 +256,6 @@ def render() -> None:
             _delete_tab(user, two_factor)
 
     with session_scope() as s:
-        n_followers, n_following = social.follow_counts(s, user.id)
+        hidden = moderation.hidden_user_ids(s, user.id)
+        n_followers, n_following = social.follow_counts(s, user.id, hidden)
     st.caption(f"👥 {n_followers} seguidores · {n_following} siguiendo")

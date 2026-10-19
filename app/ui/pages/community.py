@@ -4,29 +4,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app.auth import accounts
 from app.database.session import session_scope
 from app.services import challenges, moderation, social, users
 from app.ui.components import actions, formatting, session, widgets
 from app.ui.components.moderation import actions_menu
-
-
-@st.dialog("Enviar mensaje de apoyo")
-def support_dialog(sender_id: int, recipient_id: int, recipient_name: str) -> None:
-    st.markdown(f"Para **{recipient_name}**")
-
-    def _use_template() -> None:
-        st.session_state["support_msg"] = st.session_state.get("support_tpl") or ""
-
-    st.pills(
-        "Mensajes rápidos", social.SUPPORT_TEMPLATES, key="support_tpl", on_change=_use_template
-    )
-    message = st.text_area("Mensaje", max_chars=social.MAX_MESSAGE_LEN, key="support_msg")
-    if st.button("Enviar 💌", type="primary"):
-        actions.run_action(
-            lambda s: social.send_support(s, sender_id, recipient_id, message),
-            f"Mensaje enviado a {recipient_name}",
-        )
+from app.ui.components.support import support_dialog
 
 
 def _person_row(me, person, following: set[int], key: str) -> None:
@@ -60,15 +42,13 @@ def _public_profile(me, person_id: int) -> None:
         st.rerun()
     with session_scope() as s:
         person = users.get_user(s, person_id)
-        if person is None or person_id in moderation.hidden_user_ids(s, me.id):
+        hidden = moderation.hidden_user_ids(s, me.id)
+        if person is None or person_id in hidden:
             # Bloqueos (en cualquier dirección) o cuenta en proceso de eliminación.
             st.warning("Este perfil no está disponible.")
             return
-        n_followers, n_following = social.follow_counts(s, person.id)
-        board = challenges.leaderboard(
-            s, limit=10_000, exclude_ids=accounts.pending_deletion_ids(s)
-        )
-        score = next((e for e in board if e.user.id == person.id), None)
+        n_followers, n_following = social.follow_counts(s, person.id, hidden)
+        standing = challenges.standing(s, person.id)
 
         left, right = st.columns([1, 3])
         left.markdown(widgets.avatar_html(person, 140), unsafe_allow_html=True)
@@ -84,7 +64,12 @@ def _public_profile(me, person_id: int) -> None:
                 ("💡", person.interests),
             ]
             st.markdown("  \n".join(f"{i} {v}" for i, v in details if v))
-            links = [x for x in (person.github_url, person.linkedin_url) if x]
+            # Sólo enlaces http(s) (el servicio ya lo valida; esto cubre datos antiguos).
+            links = [
+                x
+                for x in (person.github_url, person.linkedin_url)
+                if x.startswith(("https://", "http://")) and not any(c in x for c in " ()[]<>")
+            ]
             if links:
                 st.markdown(" · ".join(f"[{x}]({x})" for x in links))
 
@@ -92,8 +77,8 @@ def _public_profile(me, person_id: int) -> None:
         cols[0].metric("Seguidores", n_followers)
         cols[1].metric("Siguiendo", n_following)
         cols[2].metric("Semestre", f"{person.current_semester}/{person.total_semesters}")
-        cols[3].metric("Puntos en retos", score.score if score else 0)
-        cols[4].metric("Retos completados", score.completed if score else 0)
+        cols[3].metric("Puntos en retos", standing.score)
+        cols[4].metric("Retos completados", standing.completed)
 
         if person.id != me.id:
             following = social.following_ids(s, me.id)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from html import escape
 from pathlib import Path
 
 # Permite `streamlit run app/main.py` sin instalar el paquete.
@@ -85,9 +86,9 @@ def main() -> None:
             f'<div style="text-align:center">{widgets.avatar_html(user, 72)}</div>',
             unsafe_allow_html=True,
         )
-        st.markdown(f"<center><b>{user.display_name}</b></center>", unsafe_allow_html=True)
+        st.markdown(f"<center><b>{escape(user.display_name)}</b></center>", unsafe_allow_html=True)
         st.caption(
-            f"<center>@{user.username} · {user.program or 'sin programa'}</center>",
+            f"<center>@{escape(user.username)} · {escape(user.program or 'sin programa')}</center>",
             unsafe_allow_html=True,
         )
         if st.button("Cerrar sesión", icon="🚪", width="stretch"):

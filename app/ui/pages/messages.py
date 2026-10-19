@@ -8,7 +8,7 @@ from app.database.session import session_scope
 from app.services import social
 from app.ui.components import formatting, session, widgets
 from app.ui.components.moderation import actions_menu
-from app.ui.pages.community import support_dialog
+from app.ui.components.support import support_dialog
 
 
 def render() -> None:
@@ -18,9 +18,10 @@ def render() -> None:
 
     tab_in, tab_out = st.tabs(["Recibidos", "Enviados"])
     with session_scope() as s:
-        unread = {m.id for m in social.inbox(s, user.id) if not m.is_read}
+        received = social.inbox(s, user.id)
+        unread = {m.id for m in received if not m.is_read}
         with tab_in:
-            messages = social.inbox(s, user.id)
+            messages = received
             if not messages:
                 st.info("Aún no has recibido mensajes de apoyo.")
             for m in messages:

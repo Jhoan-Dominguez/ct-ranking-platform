@@ -6,7 +6,6 @@ import streamlit as st
 from sqlalchemy.orm import Session
 
 from app.auth import accounts
-from app.database.models import Challenge
 from app.services import challenges
 from app.ui.components.formatting import fmt_dt
 from app.ui.components.widgets import user_chip
@@ -15,13 +14,14 @@ MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
 def challenge_ranking_banner(session: Session, challenge_id: int) -> None:
-    challenge = session.get(Challenge, challenge_id)
+    challenge = challenges.get_challenge(session, challenge_id)
     if challenge is None:
         return
     # Las cuentas en proceso de eliminación no se muestran (siguen contando en las métricas).
     hidden = accounts.pending_deletion_ids(session)
-    entries = [e for e in challenges.ranking(session, challenge_id) if e.user.id not in hidden]
-    stats = challenges.stats(session, challenge_id)
+    all_entries = challenges.ranking(session, challenge_id)
+    entries = [e for e in all_entries if e.user.id not in hidden]
+    stats = challenges.stats(session, challenge_id, all_entries)
     first = next((e for e in entries if e.position), None)
     with st.container(border=True):
         st.markdown(f"#### 🏆 {challenge.title}")

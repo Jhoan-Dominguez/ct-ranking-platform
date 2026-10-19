@@ -5,14 +5,13 @@ from __future__ import annotations
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sqlalchemy import select
 
 from app import auth
 from app.auth import accounts
 from app.core.config import get_settings
 from app.database.models import ReportReason, ReportStatus, Role, User
 from app.database.session import session_scope
-from app.services import academics, admin, challenges, forum, moderation
+from app.services import academics, admin, challenges, forum, moderation, users
 from app.ui.components import actions, formatting, rankings, session, widgets
 from app.ui.components.charts import credits_chart
 
@@ -29,7 +28,7 @@ STUDENT_COLUMNS = {
 }
 
 
-def _overview(s) -> None:
+def _overview(s, students: pd.DataFrame) -> None:
     m = admin.global_metrics(s)
     row1 = st.columns(6)
     row1[0].metric("Usuarios", m.users, f"+{m.new_users_30d} en 30 días")
@@ -59,7 +58,6 @@ def _overview(s) -> None:
         fig.update_layout(height=320, legend_title_text="", margin={"t": 10})
         st.plotly_chart(fig, width="stretch")
 
-    students = admin.students_frame(s)
     with c2:
         st.markdown("**Distribución del promedio general**")
         graded = students.dropna(subset=["promedio_general"]) if not students.empty else students
@@ -252,8 +250,7 @@ def _student_detail(s, all_users: list[User]) -> None:
         )
 
 
-def _groups(s) -> None:
-    students = admin.students_frame(s)
+def _groups(s, students: pd.DataFrame) -> None:
     if students.empty:
         st.info("No hay usuarios.")
         return
@@ -331,7 +328,7 @@ def _content(s, admin_user: User) -> None:
             "Publicaciones": lambda s2: forum.delete_post(s2, admin_user, target),
             "Comentarios": lambda s2: forum.delete_comment(s2, admin_user, target),
             "Retos": lambda s2: challenges.delete_challenge(s2, admin_user, target),
-            "Mensajes": lambda s2: admin.delete_message(s2, target),
+            "Mensajes": lambda s2: admin.delete_message(s2, admin_user, target),
         }
         actions.run_action(deleters[kind], "Elemento eliminado")
 
@@ -350,6 +347,7 @@ def _reports(s, admin_user: User) -> None:
     if not reports:
         st.success("No hay reportes en esta vista.")
         return
+    against = moderation.reports_against_counts(s)
     st.dataframe(
         pd.DataFrame(
             [
@@ -365,9 +363,7 @@ def _reports(s, admin_user: User) -> None:
                     if r.comment_id
                     else "perfil",
                     "Estado": moderation.STATUS_LABELS[ReportStatus(r.status)],
-                    "Reportes contra el usuario": moderation.reports_against_count(
-                        s, r.reported_id
-                    ),
+                    "Reportes contra el usuario": against.get(r.reported_id, 0),
                 }
                 for r in reports
             ]
@@ -443,7 +439,7 @@ def _reports(s, admin_user: User) -> None:
         ):
 
             def _disable(s2):
-                auth.set_active(s2, s2.get(User, r.reported_id), False)
+                auth.set_active(s2, users.get_user(s2, r.reported_id), False)
                 moderation.close_report(
                     s2, admin_user, r.id, ReportStatus.RESOLVED, note or "Cuenta deshabilitada"
                 )
@@ -451,10 +447,8 @@ def _reports(s, admin_user: User) -> None:
             actions.run_action(_disable, "Usuario deshabilitado y reporte resuelto")
 
 
-def _users(s, admin_user: User, all_users: list[User]) -> None:
-    st.dataframe(
-        admin.students_frame(s), hide_index=True, width="stretch", column_config=STUDENT_COLUMNS
-    )
+def _users(admin_user: User, all_users: list[User], students: pd.DataFrame) -> None:
+    st.dataframe(students, hide_index=True, width="stretch", column_config=STUDENT_COLUMNS)
     labels = _user_label(all_users)
     user_id = st.selectbox(
         "Usuario a gestionar",
@@ -476,12 +470,14 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
             format_func=lambda r: "Estudiante" if r == Role.STUDENT else "Administrador",
         )
         if st.button("Guardar rol", disabled=target.id == admin_user.id):
-            actions.run_action(lambda s2: admin.set_role(s2, user_id, role), "Rol actualizado")
+            actions.run_action(
+                lambda s2: admin.set_role(s2, admin_user, user_id, role), "Rol actualizado"
+            )
     with c2:
         label = "Deshabilitar cuenta" if target.is_active else "Habilitar cuenta"
         if st.button(label, disabled=target.id == admin_user.id):
             actions.run_action(
-                lambda s2: auth.set_active(s2, s2.get(User, user_id), not target.is_active),
+                lambda s2: auth.set_active(s2, users.get_user(s2, user_id), not target.is_active),
                 "Estado de la cuenta actualizado",
             )
     if target.id == admin_user.id:
@@ -494,7 +490,7 @@ def _users(s, admin_user: User, all_users: list[User]) -> None:
         )
         if st.button("Cancelar la eliminación de esta cuenta"):
             actions.run_action(
-                lambda s2: accounts.cancel_deletion(s2, s2.get(User, user_id)),
+                lambda s2: accounts.cancel_deletion(s2, users.get_user(s2, user_id)),
                 "Eliminación cancelada",
             )
     if not target.email_verified:
@@ -512,16 +508,19 @@ def render() -> None:
     reports_label = f"Reportes ({pending})" if pending else "Reportes"
     tabs = st.tabs(["Resumen", "Estudiante", "Grupos", "Contenido", reports_label, "Usuarios"])
     with session_scope() as s:
-        all_users = list(s.scalars(select(User).order_by(User.username)))
+        all_users = users.list_users(s)
+        # Streamlit ejecuta todas las pestañas en cada rerun: la tabla de estudiantes (la consulta
+        # más pesada del panel) se calcula una sola vez y la comparten Resumen, Grupos y Usuarios.
+        students = admin.students_frame(s)
         with tabs[0]:
-            _overview(s)
+            _overview(s, students)
         with tabs[1]:
             _student_detail(s, all_users)
         with tabs[2]:
-            _groups(s)
+            _groups(s, students)
         with tabs[3]:
             _content(s, user)
         with tabs[4]:
             _reports(s, user)
         with tabs[5]:
-            _users(s, user, all_users)
+            _users(user, all_users, students)

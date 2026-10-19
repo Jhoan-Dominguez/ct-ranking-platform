@@ -33,7 +33,7 @@ OTP_WINDOW_S = 300  # tiempo máximo entre el paso 1 (contraseña) y el paso 2 (
 def _finish_login(user_id: int, name: str, pending_deletion: bool) -> None:
     st.session_state.pop(OTP_PENDING, None)
     st.session_state.pop(REGISTERED_EMAIL, None)
-    st.session_state["user_id"] = user_id
+    session.start_session(user_id)
     if not pending_deletion:  # una cuenta en eliminación sólo ve la pantalla de cancelación
         actions.flash(f"¡Bienvenido, {name}!", "👋")
     st.rerun()

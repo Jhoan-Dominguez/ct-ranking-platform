@@ -18,6 +18,13 @@ def fmt_grade(value: float | None) -> str:
     return "—" if value is None else f"{value:.2f}"
 
 
+def grade_color(grade: float | None, passing: float) -> str:
+    """Color de una nota: verde si aprueba, rojo si no (incluido 0.0) y gris si no hay nota."""
+    if grade is None:
+        return "gray"
+    return "green" if grade >= passing else "red"
+
+
 def fmt_dt(value: datetime | date | None, with_time: bool = True) -> str:
     if value is None:
         return "—"

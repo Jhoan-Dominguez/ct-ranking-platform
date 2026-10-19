@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from datetime import datetime
+from html import escape
 
 import streamlit as st
 
 from app import auth
 from app.database.models import User
+from app.database.session import session_scope
+from app.services import users
 
 
 def _initials_svg(user: User, size: int) -> str:
@@ -18,18 +22,29 @@ def _initials_svg(user: User, size: int) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}">'
         f'<circle cx="50%" cy="50%" r="50%" fill="hsl({hue},55%,45%)"/>'
         f'<text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" '
-        f'font-family="sans-serif" font-size="{size * 0.4:.0f}" fill="#fff">{initials}</text>'
+        f'font-family="sans-serif" font-size="{size * 0.4:.0f}" fill="#fff">'
+        f"{escape(initials)}</text>"
         "</svg>"
     )
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
 
 
+@st.cache_data(max_entries=500, show_spinner=False)
+def _avatar_data_uri(user_id: int, mime: str, updated_at: datetime | None) -> str | None:
+    """La foto como data URI. ``updated_at`` es parte de la clave: al cambiar la foto se lee de
+    nuevo; mientras tanto no se vuelve a pedir a la BD."""
+    with session_scope() as s:
+        raw = users.avatar_bytes(s, user_id)
+    if raw is None:
+        return None
+    return f"data:{mime};base64," + base64.b64encode(raw).decode()
+
+
 def avatar_src(user: User, size: int = 48) -> str:
-    if user.avatar:
-        return (
-            f"data:{user.avatar_mime or 'image/png'};base64,"
-            + base64.b64encode(user.avatar).decode()
-        )
+    if user.has_avatar:
+        uri = _avatar_data_uri(user.id, user.avatar_mime or "image/png", user.avatar_updated_at)
+        if uri:
+            return uri
     return _initials_svg(user, size)
 
 
@@ -41,17 +56,19 @@ def avatar_html(user: User, size: int = 40) -> str:
 
 
 def user_chip(user: User, size: int = 32, subtitle: str = "") -> None:
-    sub = f'<br><span style="opacity:.65;font-size:.85em">{subtitle}</span>' if subtitle else ""
+    """Avatar, nombre y usuario. Todo el texto (incluido ``subtitle``, que puede traer datos de
+    otros usuarios como el programa o el título de un reto) se escapa antes de insertarlo."""
+    sub = (
+        f'<br><span style="opacity:.65;font-size:.85em">{escape(subtitle)}</span>'
+        if subtitle
+        else ""
+    )
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:.6rem">{avatar_html(user, size)}'
-        f"<div><b>{_escape(user.display_name)}</b> "
-        f'<span style="opacity:.6">@{_escape(user.username)}</span>{sub}</div></div>',
+        f"<div><b>{escape(user.display_name)}</b> "
+        f'<span style="opacity:.6">@{escape(user.username)}</span>{sub}</div></div>',
         unsafe_allow_html=True,
     )
-
-
-def _escape(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def institutional_email_input(label: str, value: str = "", key: str | None = None) -> str:

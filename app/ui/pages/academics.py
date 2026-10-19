@@ -256,7 +256,7 @@ def _subject_card(user, subject: Subject) -> None:
     grade = academics.subject_grade(subject.items)
     progress = academics.weighted_progress(subject.items)
     passing = get_settings().grade_passing
-    color = "green" if grade is not None and grade >= passing else "red" if grade else "gray"
+    color = formatting.grade_color(grade, passing)
     title = (
         f"{STATUS_LABELS[SubjectStatus(subject.status)]} · **{subject.name}** "
         f"{f'({subject.code})' if subject.code else ''} · {subject.credits} cr · "
@@ -408,7 +408,11 @@ def render() -> None:
                 sem_subjects = [x for x in subjects if x.semester == sem.semester]
                 passed = sum(1 for x in sem_subjects if x.status == SubjectStatus.PASSED)
                 marker = " · 📍 actual" if sem.semester == user.current_semester else ""
-                average = f" · promedio {formatting.fmt_grade(sem.average)}" if sem.average else ""
+                average = (
+                    f" · promedio {formatting.fmt_grade(sem.average)}"
+                    if sem.average is not None
+                    else ""
+                )
                 with _stateful_expander(
                     f"📘 **Semestre {sem.semester}**{marker} · {sem.subjects} materias · "
                     f"{sem.credits} créditos · {passed}/{sem.subjects} aprobadas{average}",

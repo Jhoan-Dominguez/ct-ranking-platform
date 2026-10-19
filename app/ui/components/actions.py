@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import streamlit as st
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import auth
@@ -13,6 +14,7 @@ from app.auth.accounts import AccountError
 from app.core.mailer import MailError
 from app.database.session import session_scope
 from app.services.academics import AcademicError
+from app.services.admin import AdminError
 from app.services.challenges import ChallengeError
 from app.services.forum import ForumError
 from app.services.moderation import ModerationError
@@ -22,6 +24,7 @@ from app.services.users import ProfileError
 USER_ERRORS = (
     auth.AuthError,
     AccountError,
+    AdminError,
     MailError,
     ModerationError,
     AcademicError,
@@ -50,6 +53,11 @@ def run_action(fn: Callable[[Session], Any], success: str | None = None, rerun: 
     except USER_ERRORS as exc:
         st.error(str(exc))
         return None
+    except IntegrityError:
+        # Dos clics seguidos (o dos pestañas) intentaron crear la misma fila: la restricción
+        # única de la BD lo impidió. Se recarga para mostrar el estado real.
+        flash("Esa acción ya se había realizado.", "ℹ️")
+        st.rerun()
     if success:
         flash(success)
     if rerun:
