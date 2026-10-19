@@ -167,17 +167,18 @@ Vida universitaria.
 | Columna | Tipo | Nulo | Default | Descripción |
 |---------|------|------|---------|-------------|
 | `id` | integer | no | serial | PK. |
-| `username` | varchar(50) | no | — | Único (índice `ix_users_username`). |
+| `username` | varchar(50) | no | — | Único (índice `ix_users_username`), más el índice funcional `ix_users_username_lower` para las búsquedas con `lower()`. |
 | `email` | varchar(255) | no | — | Único (índice `ix_users_email`). Se guarda en minúsculas. |
 | `password_hash` | varchar(255) | sí | — | Hash bcrypt (sólo con `AUTH_PROVIDER=local`). |
 | `keycloak_id` | varchar(64) | sí | — | `sub` del usuario en Keycloak. Único. |
 | `role` | varchar(20) | no | `student` | `student` / `admin`. |
 | `is_active` | boolean | no | `true` | Cuenta habilitada. |
 | `first_name`, `last_name` | varchar(80) | no | `''` | Nombre y apellido. |
-| `alias` | varchar(50) | no | `''` | Nombre visible. Único sin distinguir mayúsculas (validado en el servicio). |
+| `alias` | varchar(50) | no | `''` | Nombre visible. Único sin distinguir mayúsculas: lo valida el servicio y lo garantiza el índice único parcial `uq_users_alias_lower` (`lower(alias)` donde `alias <> ''`). |
 | `bio` | text | no | `''` | Biografía (máx. 1000 caracteres, validado). |
-| `avatar` | bytea | sí | — | Foto de perfil en PNG de 256×256 ya procesada. |
-| `avatar_mime` | varchar(50) | sí | — | Siempre `image/png` cuando hay foto. |
+| `avatar` | bytea | sí | — | Foto de perfil en PNG de 256×256 ya procesada. Columna **diferida** (`deferred`): no viaja en cada `SELECT` de usuarios; la UI la pide con `users.avatar_bytes` y la guarda en caché. |
+| `avatar_mime` | varchar(50) | sí | — | Siempre `image/png` cuando hay foto. `NULL` = sin foto (`User.has_avatar`). |
+| `avatar_updated_at` | timestamptz | sí | — | Última vez que cambió la foto. Forma parte de la clave de la caché de la UI. |
 | `phone`, `city`, `university`, `student_code`, `interests`, `github_url`, `linkedin_url` | varchar | no | `''` | Datos adicionales del perfil. |
 | `birth_date` | date | sí | — | No puede estar en el futuro. |
 | `program` | varchar(150) | no | `''` | Programa o carrera. |
@@ -188,10 +189,10 @@ Vida universitaria.
 | `last_login` | timestamptz | sí | — | Se actualiza en cada login. Se usa para "activos en 7 días". |
 | `email_verified` | boolean | no | `true` | `false` mientras no se abra el enlace de activación (Keycloak). Se sincroniza en cada login. |
 | `deletion_requested_at` | timestamptz | sí | — | Cuándo se confirmó la solicitud de eliminación. |
-| `deletion_scheduled_for` | timestamptz | sí | — | Fecha de borrado definitivo. Si no es `NULL`, la cuenta está desactivada y oculta. |
+| `deletion_scheduled_for` | timestamptz | sí | — | Fecha de borrado definitivo. Si no es `NULL`, la cuenta está desactivada y oculta. Índice (se consulta en cada rerun). |
 
 Propiedades calculadas (no son columnas): `full_name`, `display_name` (alias, luego nombre
-completo, luego username) e `is_admin`.
+completo, luego username), `is_admin`, `pending_deletion` y `has_avatar`.
 
 ### `subjects`: materias del plan de un estudiante
 
@@ -262,7 +263,7 @@ columnas son FK con CASCADE. Tiene además `created_at`.
 | `title` | varchar(200) | no | — | ≥ 5 caracteres. |
 | `description` | text | no | — | |
 | `kind` | varchar(20) | no | `usuario` | `global` (sólo lo crea un admin) o `usuario`. |
-| `creator_id` | integer | sí | — | FK → `users.id` CASCADE. Los retos globales de `init_db` quedan a nombre del admin. |
+| `creator_id` | integer | sí | — | FK → `users.id` **`ON DELETE SET NULL`**. Índice. Los retos globales de `init_db` quedan a nombre del admin; si se borra el creador, el reto y los puntos ganados se conservan. |
 | `difficulty` | varchar(20) | no | `media` | `facil` / `media` / `dificil`. |
 | `points` | integer | no | `10` | 1 a 100. |
 | `visibility` | varchar(20) | no | `publico` | `publico` / `seguidores`. Los globales siempre son `publico`. |
@@ -287,7 +288,8 @@ Restricción `uq_participant UNIQUE (challenge_id, user_id)`.
 ### `follows`: relaciones de seguimiento
 
 PK compuesta `(follower_id, followed_id)`, ambas FK → `users.id` CASCADE, más `created_at`.
-`CHECK ck_no_self_follow (follower_id <> followed_id)` impide seguirse a sí mismo.
+`ix_follows_followed_id` acelera contar y listar seguidores (la PK sólo sirve para buscar por
+`follower_id`). `CHECK ck_no_self_follow (follower_id <> followed_id)` impide seguirse a sí mismo.
 
 ### `support_messages`: mensajes de apoyo
 
@@ -300,14 +302,18 @@ PK compuesta `(follower_id, followed_id)`, ambas FK → `users.id` CASCADE, más
 | `is_read` | boolean | no | `false` | Se marca al abrir la bandeja. |
 | `created_at` | timestamptz | no | ahora | |
 
+Índice compuesto `ix_support_messages_recipient_unread (recipient_id, is_read)` para el contador de
+no leídos y `CHECK ck_no_self_message (sender_id <> recipient_id)`.
+
 ### `verification_codes`: códigos de un solo uso
 
 | Columna | Tipo | Nulo | Default | Descripción |
 |---------|------|------|---------|-------------|
 | `id` | integer | no | serial | PK. |
 | `user_id` | integer | no | — | FK → `users.id` CASCADE. Índice. |
-| `purpose` | varchar(30) | no | — | Para qué sirve. Hoy sólo existe `delete_account`. |
-| `code_hash` | varchar(255) | no | — | `HMAC-SHA256(código, secreto del servidor)`. El código nunca se guarda en claro. |
+| `purpose` | varchar(30) | no | — | Para qué sirve: `delete_account` o `change_email`. |
+| `code_hash` | varchar(255) | no | — | `HMAC-SHA256(código, APP_SECRET_KEY)`. El código nunca se guarda en claro. |
+| `payload` | varchar(255) | no | `''` | Dato asociado: en `change_email`, el correo nuevo. |
 | `attempts` | integer | no | `0` | Intentos fallidos (máx. 5). |
 | `expires_at` | timestamptz | no | — | Creación + 15 minutos. |
 | `used_at` | timestamptz | sí | — | Momento de uso o de invalidación (al pedir un código nuevo). |
@@ -316,7 +322,7 @@ PK compuesta `(follower_id, followed_id)`, ambas FK → `users.id` CASCADE, más
 ### `user_blocks`: bloqueos
 
 PK compuesta `(blocker_id, blocked_id)`, ambas FK → `users.id` CASCADE, más `created_at`.
-`CHECK ck_no_self_block (blocker_id <> blocked_id)` impide bloquearse a sí mismo. Los efectos
+`ix_user_blocks_blocked_id` permite buscar bloqueos en la otra dirección. `CHECK ck_no_self_block (blocker_id <> blocked_id)` impide bloquearse a sí mismo. Los efectos
 del bloqueo se aplican en ambas direcciones (ver
 [Cuentas y moderación](14-cuentas-seguridad-y-moderacion.md#bloquear-usuarios)).
 
@@ -336,33 +342,47 @@ del bloqueo se aplican en ambas direcciones (ver
 | `resolved_by_id` | integer | sí | — | Administrador que lo cerró. FK → `users.id` `ON DELETE SET NULL`. |
 | `created_at`, `resolved_at` | timestamptz | no / sí | ahora / — | |
 
+`CHECK ck_no_self_report (reporter_id <> reported_id)` y `CHECK ck_report_single_target
+(post_id IS NULL OR comment_id IS NULL)`: un reporte apunta a una publicación, a un comentario o
+sólo al perfil.
+
 ## Índices y restricciones
 
 | Nombre | Tabla | Tipo |
 |--------|-------|------|
 | `ix_users_username`, `ix_users_email` | users | únicos |
+| `ix_users_username_lower` | users | índice funcional `lower(username)` |
+| `uq_users_alias_lower` | users | único parcial `lower(alias)` donde `alias <> ''` |
+| `ix_users_deletion_scheduled_for` | users | índice |
 | `users_keycloak_id_key` | users | único |
 | `ix_subjects_user_id` | subjects | índice |
 | `ix_grade_items_subject_id` | grade_items | índice |
+| `ix_post_likes_user_id` | post_likes | índice |
+| `ix_challenges_creator_id` | challenges | índice |
+| `ix_follows_followed_id` | follows | índice |
+| `ix_user_blocks_blocked_id` | user_blocks | índice |
 | `ix_posts_author_id` | posts | índice |
 | `ix_comments_post_id`, `ix_comments_author_id` | comments | índices |
 | `ix_challenge_participants_challenge_id`, `…_user_id` | challenge_participants | índices |
 | `uq_participant` | challenge_participants | único compuesto |
-| `ix_support_messages_sender_id`, `…_recipient_id` | support_messages | índices |
-| `ck_item_weight` | grade_items | CHECK |
+| `ix_support_messages_sender_id`, `…_recipient_id`, `…_recipient_unread` | support_messages | índices |
+| `ck_no_self_message` | support_messages | CHECK |
+| `ck_item_weight`, `ck_item_grade` | grade_items | CHECK |
 | `ck_no_self_follow` | follows | CHECK |
 | `ix_verification_codes_user_id` | verification_codes | índice |
 | `ck_no_self_block` | user_blocks | CHECK |
 | `ix_user_reports_reporter_id`, `…_reported_id`, `…_status` | user_reports | índices |
+| `ck_no_self_report`, `ck_report_single_target` | user_reports | CHECK |
 
 ## Borrado en cascada
 
-Todas las claves foráneas tienen `ON DELETE CASCADE`. Además, varias relaciones ORM declaran
+Las claves foráneas hacia `users` tienen `ON DELETE CASCADE`, salvo `challenges.creator_id` y
+`user_reports.resolved_by_id` (`SET NULL`). Además, varias relaciones ORM declaran
 `cascade="all, delete-orphan"`. El efecto de cada borrado:
 
 | Se borra | También se borran |
 |----------|-------------------|
-| Un usuario | Sus materias (y sus ítems), publicaciones, comentarios, "me gusta", retos creados (con sus participaciones), participaciones, relaciones de seguimiento y mensajes enviados y recibidos. |
+| Un usuario | Sus materias (y sus ítems), publicaciones, comentarios, "me gusta", participaciones, relaciones de seguimiento y mensajes enviados y recibidos. Sus retos **no** se borran por la FK (`creator_id` pasa a `NULL`): la purga de cuentas borra aparte sus retos de la comunidad y conserva los globales. |
 | Una materia | Sus ítems calificables. |
 | Una publicación | Sus comentarios y "me gusta". |
 | Un reto | Sus participaciones (y con ellas el ranking del reto). |

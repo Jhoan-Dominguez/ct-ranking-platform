@@ -45,6 +45,8 @@ make format                                  # isort + ruff fix + ruff format en
   - Cada prueba recibe una BD **SQLite en memoria** nueva: `configure("sqlite://")` +
     `StaticPool` + `create_all`.
   - La fixture `make_user` crea usuarios con `auth.register`.
+  - Una fixture automática reinicia los contadores de `app/core/ratelimit.py` entre pruebas.
+  - `pythonpath = ["."]` en `pyproject.toml` permite importar `app` sin instalar el paquete.
 - **Alcance:** las pruebas cubren la **capa de servicios**. No necesitan Docker ni Keycloak.
 
 ```bash
@@ -63,8 +65,9 @@ make test                                                     # todas
 | `test_social.py` | Seguir, dejar de seguir y mensajes de apoyo no leídos. |
 | `test_forum.py` | Flujo del foro y permisos (autor o admin). |
 | `test_admin.py` | Marca de estudiante en riesgo y métricas globales. |
-| `test_accounts.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación. |
+| `test_accounts.py` | Eliminación con contraseña y código por correo; código de un solo uso, límite de intentos, espera entre códigos y expiración; cancelación y purga con borrado en cascada; ocultamiento de cuentas en eliminación. |
 | `test_moderation.py` | Bloqueos (seguimientos, mensajes, búsqueda, foro, bidireccionalidad) y reportes (validaciones, duplicados, cierre por admin, conservación al borrar el contenido). |
+| `test_audit_validation.py` | Regresión de los hallazgos de `AUDITORIA.md`: intentos fallidos que sobreviven al rollback, vinculación con Google sin tomar cuentas ajenas, cambio de correo con código, admins con Google, rol que no se revierte, pensum sin duplicados, nota `0.0`, borrar el creador de un reto, bono y conteos sin cuentas en eliminación, escape de HTML y enlaces, reglas desconocidas, bloqueo del login local, restricciones de la BD, métricas en SQL y foto diferida. |
 
 ### Pruebas de la interfaz (manuales o con `AppTest`)
 

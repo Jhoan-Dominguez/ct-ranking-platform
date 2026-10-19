@@ -62,10 +62,10 @@ sequenceDiagram
 |-------|-------|----------|
 | Botones | `app/ui/pages/login.py` | `st.login("google")` en *Iniciar sesión* y `st.login("googlesignup")` en *Crear cuenta*. Si se rechaza el ingreso, muestra el aviso con «Crear cuenta con Google» y «Usar otra cuenta de Google». |
 | Retorno | `app/ui/components/session.py` → `sync_oidc_session()` | Lee `st.user` y llama a `auth.login_with_oidc(..., allow_create=provider == "googlesignup")`. |
-| Reglas | `app/auth/service.py` → `login_with_oidc` | Exige `email_verified` y el dominio institucional. Busca la cuenta por `keycloak_id` o por correo. Sin cuenta y sin `allow_create`, lanza `AccountNotFoundError`. Rechaza las cuentas deshabilitadas. |
+| Reglas | `app/auth/service.py` → `login_with_oidc` | Exige `email_verified` y el dominio institucional (los administradores están exentos). Busca la cuenta por `keycloak_id` y luego por correo; **nunca por username**. Si el correo ya está vinculado a otro usuario de Keycloak, rechaza el ingreso. Sin cuenta y sin `allow_create`, lanza `AccountNotFoundError`. Rechaza las cuentas deshabilitadas. Si el username que propone Keycloak ya existe, la cuenta nueva recibe uno con número (`carlos2`). |
 | Configuración de `st.login` | `.streamlit/secrets.toml` (generado) | Lo genera `scripts/write_streamlit_secrets.py` desde `.env`: `redirect_uri`, cookie firmada y los proveedores `google` y `googlesignup` con `kc_idp_hint=google`. Está en `.gitignore`. |
 | Proveedor en Keycloak | `scripts/configure_keycloak.py` (en `make up`) | Crea o actualiza el proveedor `google` (`hostedDomain`, `trustEmail`, *mapper* de username). Si `GOOGLE_CLIENT_ID` está vacío, lo quita. |
-| Cierre de sesión | `session.logout()` | Limpia la sesión de la app y llama a `st.logout()`, que también cierra la sesión en Keycloak. |
+| Cierre de sesión | `session.logout()` | Limpia la sesión de la app y llama a `st.logout()`, que también cierra la sesión en Keycloak. También se llama si la cuenta se deshabilita mientras está abierta, para que la cookie no reintente el ingreso. |
 
 ## Qué datos se obtienen y cómo se guardan
 

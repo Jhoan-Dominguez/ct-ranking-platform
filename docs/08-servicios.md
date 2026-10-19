@@ -6,7 +6,9 @@ paquete `app/auth/` y el correo en `app/core/mailer.py`. Todos comparten varias 
 - Reciben una `Session` como primer argumento y **no** hacen `commit`. El commit lo hace
   `session_scope()`.
 - Validan los datos y lanzan una excepción de dominio con un mensaje en español.
-- Verifican la **propiedad**: un estudiante sólo puede modificar sus propios datos.
+- Verifican la **propiedad**: un estudiante sólo puede modificar sus propios datos. Las
+  funciones de administración reciben al `actor` y comprueban que sea admin, aunque la página
+  ya lo haya verificado.
 - No importan Streamlit.
 
 | Módulo | Excepción | Responsabilidad |
@@ -18,10 +20,11 @@ paquete `app/auth/` y el correo en `app/core/mailer.py`. Todos comparten varias 
 | `academics.py` | `AcademicError` | Materias, ítems, promedios, créditos y pensum. |
 | `challenges.py` | `ChallengeError` | Retos, participación, ranking y leaderboard. |
 | `challenge_rules.py` | — | Reglas de verificación automática. |
-| `admin.py` | — | Métricas y consultas del panel de administrador. |
-| `app/auth/accounts.py` | `AccountError` | Eliminación diferida de cuentas con doble verificación y purga. |
+| `admin.py` | `AdminError` | Métricas, consultas y gestión del panel de administrador. |
+| `app/auth/accounts.py` | `AccountError` (`InvalidCodeError`) | Eliminación diferida de cuentas, cambio de correo verificado y purga. |
 | `moderation.py` | `ModerationError` | Bloqueos entre usuarios y reportes. |
 | `app/core/mailer.py` | `MailError` | Envío de correos de la app (SMTP o memoria). |
+| `app/core/ratelimit.py` | `RateLimitError` (o la que reciba) | Límite de intentos en memoria: login local, reenvío de correos de Keycloak. |
 
 ---
 
@@ -32,11 +35,11 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | Módulo | Contenido |
 |--------|-----------|
 | `service.py` | API pública (lo que reexporta `app/auth/__init__.py`). |
-| `keycloak.py` | `KeycloakClient` e `Identity`: login por contraseña, API de administración, correos y credenciales OTP. `password_login(..., password_only=True)` usa el cliente `ct-ranking-pwcheck` (paso 1 del login), y `delete_broker_only_user` borra usuarios creados sólo por Google. |
+| `keycloak.py` | `KeycloakClient` e `Identity`: login por contraseña, API de administración, correos y credenciales OTP. `password_login(..., password_only=True)` usa el cliente `ct-ranking-pwcheck` (paso 1 del login), y `delete_broker_only_user` borra usuarios creados sólo por Google. Reutiliza las conexiones HTTP (`requests.Session`) y guarda en caché el token de la cuenta de servicio hasta poco antes de que venza. |
 | `validation.py` | Usuario, correo, dominio institucional, nombres y contraseña. |
 | `passwords.py` | `hash_password` y `check_password` (bcrypt). |
 | `errors.py` | `AuthError`, `EmailNotVerifiedError`, `AccountNotFoundError` (Google sin cuenta) e `INVALID_LOGIN`. |
-| `accounts.py` | Eliminación diferida (ver más abajo). |
+| `accounts.py` | Eliminación diferida y cambio de correo (ver más abajo). |
 
 | Función | Descripción |
 |---------|-------------|
@@ -44,16 +47,18 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | `student_domain()`, `student_email(local)`, `validate_student_email(email)` | Dominio institucional obligatorio para estudiantes: arma el correo a partir de la parte local y lo valida. |
 | `hash_password`, `check_password` | bcrypt. |
 | `KeycloakClient` | `password_login`, `create_user`, `reset_password`, `update_user`, `set_enabled`. |
-| `login`, `register`, `change_password`, `change_email`, `change_names`, `set_active` | API pública, independiente del proveedor. |
+| `login`, `register`, `change_password`, `change_names`, `set_active` | API pública, independiente del proveedor. |
+| `validate_new_email(session, user, email)`, `apply_verified_email(session, user, email)` | Validan y aplican un correo nuevo. `apply_verified_email` sólo se llama después de comprobar el código enviado a ese correo (`accounts.confirm_email_change`). |
 
 ## `users.py`
 
 | Función | Descripción |
 |---------|-------------|
-| `get_user(session, user_id)` | Usuario por id. |
-| `update_profile(session, user, **fields)` | Actualiza los campos permitidos (`PROFILE_FIELDS`: alias, bio, phone, city, university, student_code, interests, github_url, linkedin_url, program, study_plan), cada uno con su longitud máxima. También `birth_date` (no futura) y `current_semester`/`total_semesters` (1 ≤ actual ≤ total ≤ 20). El alias es único sin distinguir mayúsculas. |
+| `get_user(session, user_id)`, `list_users(session)` | Usuario por id; todos los usuarios ordenados por username. |
+| `avatar_bytes(session, user_id)` | La foto (columna diferida) sin cargar el resto de la fila. |
+| `update_profile(session, user, **fields)` | Actualiza los campos permitidos (`PROFILE_FIELDS`: alias, bio, phone, city, university, student_code, interests, github_url, linkedin_url, program, study_plan), cada uno con su longitud máxima. También `birth_date` (no futura) y `current_semester`/`total_semesters` (1 ≤ actual ≤ total ≤ 20). El alias es único sin distinguir mayúsculas. `github_url` y `linkedin_url` deben ser enlaces `http(s)://` con dominio (se rechazan `javascript:` y caracteres que rompan el Markdown). |
 | `process_avatar(raw)` | Valida que sea imagen y pese ≤ 5 MB; la recorta al centro en cuadrado, la redimensiona a 256×256 y devuelve PNG. |
-| `set_avatar(user, raw \| None)` | Guarda la imagen procesada, o la elimina si recibe `None`. |
+| `set_avatar(user, raw \| None)` | Guarda la imagen procesada, o la elimina si recibe `None`. Actualiza `avatar_updated_at`. |
 | `search_users(session, query, *, exclude_id, hidden_ids, limit=50)` | Usuarios activos, con el correo verificado y sin eliminación programada, cuyo username, alias, nombre, apellido o programa contienen el texto. `hidden_ids` excluye, por ejemplo, a los usuarios bloqueados. |
 
 ## `forum.py`
@@ -63,7 +68,7 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | `CATEGORIES` | Lista de categorías válidas. |
 | `ORDERINGS` | `{"Más recientes": "recent", "Más comentadas": "comments", "Más valoradas": "likes"}`. |
 | `create_post(session, author_id, *, title, body, category, tags)` | Título de 5 a 200 caracteres, cuerpo no vacío y categoría válida. Las etiquetas se normalizan a minúsculas. |
-| `list_posts(session, *, search, category, solved, author_ids, exclude_author_ids, order, limit)` | Devuelve `PostRow(post, comments, likes)`. Busca en título, cuerpo y etiquetas. |
+| `list_posts(session, *, search, category, solved, author_ids, exclude_author_ids, order, limit)` | Devuelve `PostRow(post, comments, likes)`. Busca en título, cuerpo y etiquetas. Los conteos tampoco incluyen comentarios ni "me gusta" de `exclude_author_ids`. |
 | `get_post(session, post_id)` | Publicación con autor, comentarios (con autor) y "me gusta" ya cargados. |
 | `add_comment(session, post_id, author_id, body)` | Comentario de 1 a 5000 caracteres. |
 | `delete_post` / `delete_comment(session, actor, id)` | Sólo el autor o un admin. |
@@ -75,7 +80,7 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | Función | Descripción |
 |---------|-------------|
 | `follow` / `unfollow(session, follower_id, followed_id)` | `follow` es idempotente. No permite seguirse a sí mismo ni seguir a alguien con quien hay un bloqueo. |
-| `is_following`, `following_ids`, `followers`, `following`, `follow_counts` | Consultas de la red: `follow_counts` devuelve (seguidores, seguidos). |
+| `is_following`, `following_ids`, `followers`, `following`, `follow_counts` | Consultas de la red: `follow_counts(session, user_id, hidden_ids=None)` devuelve (seguidores, seguidos) sin contar `hidden_ids`. |
 | `SUPPORT_TEMPLATES` | Mensajes rápidos: "¡Vamos, tú puedes! 💪", "No te rindas…", etc. |
 | `send_support(session, sender_id, recipient_id, message)` | Mensaje de 1 a 500 caracteres a otro usuario existente. |
 | `inbox`, `sent(session, user_id, limit=100)` | Mensajes recibidos y enviados, con el remitente o destinatario ya cargado. `inbox` y `unread_count` excluyen a los usuarios bloqueados y a las cuentas en eliminación. `send_support` rechaza el envío si hay un bloqueo. |
@@ -114,15 +119,18 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 |---------|-------------|
 | `SCOPES` | Filtros de la UI: Todos, Globales, Comunidad, De quienes sigo, Creados por mí, En los que participo. |
 | `create_challenge(session, creator, *, title, description, difficulty, points, visibility, starts_at, ends_at, kind, rule)` | Valida los datos. `kind=global` sólo lo puede crear un admin, y un reto global siempre es público. `rule` debe existir en `RULES`. |
-| `list_challenges(session, user, *, scope, only_open, hidden_creator_ids) -> list[ChallengeRow]` | Retos visibles con conteo de participantes y completados, más la participación del usuario. |
+| `list_challenges(session, user, *, scope, only_open, hidden_creator_ids) -> list[ChallengeRow]` | Retos visibles con conteo de participantes y completados (calculados en SQL), más la participación del usuario. |
+| `get_challenge(session, challenge_id)` | Reto por id. |
 | `is_open(challenge)` | Activo y dentro de la ventana `starts_at`–`ends_at`. |
 | `join(session, user, challenge_id)` | Une al usuario si el reto es visible y está abierto. Es idempotente. Si el reto tiene regla y ya se cumple, lo completa al instante. |
 | `leave(session, user, challenge_id)` | No se puede abandonar un reto ya completado. |
 | `complete(session, user, challenge_id, evidence)` | Con regla: verifica la meta. Sin regla: exige evidencia. Marca `completed_at`. |
 | `refresh_automatic(session, user) -> list[str]` | Completa los retos con regla que el usuario ya cumple y devuelve sus títulos. Se llama en Inicio y en Retos. |
 | `ranking(session, challenge_id) -> list[RankingEntry]` | Primero quienes completaron (por `completed_at`, con posición), luego los pendientes (por `joined_at`). |
-| `stats(session, challenge_id) -> ChallengeStats` | Participantes, completados, primero en completar y tasa de éxito. |
-| `leaderboard(session, *, limit, user_ids, exclude_ids) -> list[LeaderboardEntry]` | Puntaje total, retos completados y cantidad de veces que llegó primero. |
+| `stats(session, challenge_id, entries=None) -> ChallengeStats` | Participantes, completados, primero en completar y tasa de éxito. Acepta el resultado de `ranking` para no repetir la consulta. |
+| `leaderboard(session, *, limit, user_ids, exclude_ids) -> list[LeaderboardEntry]` | Puntaje total, retos completados y cantidad de veces que llegó primero. Se calcula en SQL con `LIMIT`. |
+| `standing(session, user_id) -> Standing` | Puntaje, retos completados y posición de un usuario, sin cargar todo el ranking (Inicio y perfil público). |
+| `scores_by_user(session) -> dict[int, int]` | Puntaje de cada usuario (tabla del panel). |
 | `set_active`, `delete_challenge(session, actor, id, …)` | Sólo el creador o un admin. |
 | `following_activity(session, user, limit)` | Últimos retos completados por las personas que sigo. |
 | `completed_by(session, user_id)` | Retos completados por un usuario (perfil público). |
@@ -145,28 +153,32 @@ Ver el detalle en [Autenticación](05-autenticacion.md). El paquete se divide en
 | `creator` | 1 | Retos creados. |
 | `profile_complete` | 4 | Campos completados entre alias, foto, programa y biografía. |
 
-Funciones: `progress(session, code, user_id) -> (actual, meta)` e `is_satisfied(...)`.
+Funciones: `progress(session, code, user_id) -> (actual, meta)` e `is_satisfied(...)`. Un código
+que ya no existe en `RULES` (p. ej. una regla renombrada) devuelve `(0, 1)` y se muestra como no
+cumplido, en lugar de romper Inicio y Retos.
 
 ## `admin.py`
 
 | Función | Devuelve |
 |---------|----------|
-| `global_metrics(session) -> GlobalMetrics` | Usuarios, activos en 7 días, nuevos en 30 días, publicaciones, comentarios, retos globales y de comunidad, participaciones, completados, mensajes, seguimientos y notas., reportes pendientes, cuentas por eliminar y cuentas sin activar. |
+| `global_metrics(session) -> GlobalMetrics` | Usuarios, activos en 7 días, nuevos en 30 días, publicaciones, comentarios, retos globales y de comunidad, participaciones, completados, mensajes, seguimientos, notas, reportes pendientes, cuentas por eliminar y cuentas sin activar. Todo en una sola consulta. |
 | `students_frame(session, user_ids=None) -> DataFrame` | Una fila por usuario con los promedios, materias por estado, créditos aprobados, publicaciones, comentarios, retos completados, puntos, seguidores, apoyos recibidos, último ingreso y la marca `en_riesgo`. Incluye además `verificado`, `eliminacion_programada` y `reportes_recibidos`. |
-| `activity_frame(session, days=30) -> DataFrame` | Conteo diario de publicaciones, comentarios, retos completados y mensajes. |
+| `activity_frame(session, days=30) -> DataFrame` | Conteo diario de publicaciones, comentarios, retos completados y mensajes, agrupado por día en SQL. |
 | `user_detail(session, user_id) -> UserDetail` | Usuario, materias, resumen académico, seguidores, seguidos, publicaciones, participaciones y mensajes recibidos y enviados. |
 | `challenges_frame`, `posts_frame`, `comments_frame`, `messages_frame` | Tablas de contenido para moderar. |
-| `set_role(session, user_id, role)`, `delete_message(session, id)` | Gestión. |
+| `set_role(session, actor, user_id, role)`, `delete_message(session, actor, id)` | Gestión. Exigen que `actor` sea admin; nadie puede cambiar su propio rol. |
 
 ## `app/auth/accounts.py`
 
 | Función | Descripción |
 |---------|-------------|
-| `request_deletion(session, user, password, otp=None)` | Re-autentica (contraseña + 2FA), invalida los códigos anteriores y envía por correo un código de 6 dígitos válido 15 min. |
-| `confirm_deletion(session, user, code) -> datetime` | Valida el código (máx. 5 intentos) y programa la eliminación en `ACCOUNT_DELETION_DAYS` días. Envía un aviso por correo. |
+| `request_deletion(session, user, password, otp=None)` | Re-autentica (contraseña + 2FA), invalida los códigos anteriores y envía por correo un código de 6 dígitos válido 15 min. Entre dos códigos debe pasar al menos un minuto. |
+| `confirm_deletion(session, user, code) -> datetime` | Valida el código (máx. 5 intentos) y programa la eliminación en `ACCOUNT_DELETION_DAYS` días. Envía un aviso por correo. Un código incorrecto lanza `InvalidCodeError`, que guarda el intento aunque la acción falle. |
+| `request_email_change(session, user, email) -> str` | Valida el correo nuevo y le envía un código de 6 dígitos. El correo todavía no cambia. |
+| `confirm_email_change(session, user, code) -> str` | Valida el código, vuelve a comprobar que el correo siga libre, lo aplica (en Keycloak queda verificado) y avisa al correo anterior. |
 | `cancel_deletion(session, user)` | Revierte la solicitud y avisa por correo. |
 | `pending_deletion_ids(session)` | Ids de las cuentas con eliminación programada (se ocultan en la plataforma). |
-| `purge_due_accounts(session, now=None) -> list[str]` | Borra en Keycloak y en la app las cuentas vencidas. Lo usan `app/jobs/purge_accounts.py` y `make purge-accounts`. |
+| `purge_due_accounts(session, now=None) -> list[str]` | Borra en la app y en Keycloak las cuentas vencidas, cada una en un *savepoint*: si Keycloak falla, esa cuenta se revierte y se reintenta después. Borra los retos de la comunidad del usuario y conserva los globales. Lo usan `app/jobs/purge_accounts.py` y `make purge-accounts`. |
 
 ## `moderation.py`
 
@@ -174,9 +186,9 @@ Funciones: `progress(session, code, user_id) -> (actual, meta)` e `is_satisfied(
 |---------|-------------|
 | `block` / `unblock(session, blocker_id, blocked_id)` | Bloquear borra los seguimientos entre ambos. No se puede bloquear a uno mismo. |
 | `has_blocked`, `is_blocked_between`, `blocked_ids`, `blocked_users` | Consultas de bloqueo. `blocked_ids` considera ambas direcciones. |
-| `hidden_user_ids(session, viewer_id)` | Bloqueos (en ambas direcciones) + cuentas en eliminación. Las vistas lo usan para ocultar contenido. |
-| `report(session, reporter_id, reported_id, *, reason, description, post_id, comment_id)` | Crea un reporte. Valida el motivo y la descripción, y evita los duplicados pendientes. |
-| `list_reports(session, status=None)`, `pending_reports_count`, `reports_against_count` | Consultas para el panel. |
+| `hidden_user_ids(session, viewer_id)` | Bloqueos (en ambas direcciones) + cuentas en eliminación. Las vistas lo usan para ocultar contenido y para los conteos de seguidores, comentarios y "me gusta". |
+| `report(session, reporter_id, reported_id, *, reason, description, post_id, comment_id)` | Crea un reporte. Valida el motivo y la descripción, que no apunte a la vez a una publicación y a un comentario, y evita los duplicados pendientes. |
+| `list_reports(session, status=None)`, `pending_reports_count`, `reports_against_count`, `reports_against_counts` | Consultas para el panel. `reports_against_counts` devuelve los reportes de todos los usuarios en una sola consulta. |
 | `close_report(session, admin, report_id, status, note)` | Resuelve o descarta un reporte (sólo administradores). |
 | `REASON_LABELS`, `STATUS_LABELS` | Etiquetas en español para la UI. |
 

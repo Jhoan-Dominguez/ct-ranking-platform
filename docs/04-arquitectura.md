@@ -80,11 +80,12 @@ ct-ranking-platform/
 │   ├── main.py                     # Entrada de Streamlit: navegación, sesión y tarea de purga
 │   ├── core/                       # Transversal
 │   │   ├── config.py               #   Settings desde .env (get_settings)
-│   │   └── mailer.py               #   Envío de correos (SMTP o memoria)
+│   │   ├── mailer.py               #   Envío de correos (SMTP o memoria)
+│   │   └── ratelimit.py            #   Límite de intentos en memoria (login local, reenvíos)
 │   ├── database/                   # Persistencia
 │   │   ├── models.py               #   Modelos ORM y enumeraciones
 │   │   ├── session.py              #   Motor, sessionmaker y session_scope()
-│   │   ├── init_db.py              #   CLI: esquema, columnas nuevas y datos base (--reset, --demo)
+│   │   ├── init_db.py              #   CLI: esquema, columnas/índices/CHECK nuevos y datos base
 │   │   └── seeds/                  #   Datos de referencia
 │   │       ├── base.py             #     Administrador y 10 retos globales
 │   │       ├── demo.py             #     Datos de demostración (make seed-demo)
@@ -95,7 +96,7 @@ ct-ranking-platform/
 │   │   ├── validation.py           #   Usuario, correo institucional, nombres y contraseña
 │   │   ├── passwords.py            #   Hash bcrypt (proveedor local)
 │   │   ├── errors.py               #   AuthError, EmailNotVerifiedError
-│   │   └── accounts.py             #   Eliminación diferida de cuentas y purga
+│   │   └── accounts.py             #   Eliminación diferida, cambio de correo verificado y purga
 │   ├── services/                   # Lógica de negocio por dominio (sin Streamlit)
 │   │   ├── academics.py            #   Materias, ítems, promedios, créditos, carga de pensum
 │   │   ├── challenges.py           #   Retos, participación, ranking, leaderboard
@@ -119,13 +120,14 @@ ct-ranking-platform/
 │       │   ├── charts.py           #     Avance de créditos y evolución del promedio
 │       │   ├── rankings.py         #     Banners de ranking por reto y general
 │       │   ├── moderation.py       #     Menú «Más» y diálogos de reportar y bloquear
+│       │   ├── support.py          #     Diálogo para enviar mensajes de apoyo
 │       │   └── sidebar.py          #     Menú lateral que se expande con el mouse
 │       └── assets/
 │           └── sidebar_hover.js    #   JavaScript del menú lateral
 ├── docker/
 │   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
 │   └── postgres/01-create-keycloak-db.sql
-├── scripts/                        # Operación (los usa el Makefile)
+├── scripts/                        # Operación (los usa el Makefile con `python -m scripts.<nombre>`)
 │   ├── wait_for_services.py        #   Espera a PostgreSQL y Keycloak
 │   ├── configure_keycloak.py       #   SMTP, URLs de la app y proveedor Google en el realm
 │   ├── write_streamlit_secrets.py  #   Genera .streamlit/secrets.toml para st.login
@@ -176,18 +178,24 @@ sequenceDiagram
 
 | Clave | Quién la escribe | Significado |
 |-------|------------------|-------------|
-| `user_id` | `ui/pages/login.py` | Id del usuario autenticado. Su ausencia equivale a no tener sesión iniciada. |
+| `user_id` | `session.start_session` (login) y `sync_oidc_session` (Google) | Id del usuario autenticado. Su ausencia equivale a no tener sesión iniciada. |
+| `_login_at` | `session.start_session` | Hora del login con contraseña, para el vencimiento (`SESSION_TTL_HOURS`). |
+| `_current_user` | `session.current_user` (desde `main.py`) | Usuario cargado en esta ejecución; `require_user()` lo reutiliza sin otra consulta. |
+| `_otp_pending` | `ui/pages/login.py` | Paso 2 del login con 2FA (usuario y contraseña, como máximo 5 minutos). |
 | `_flash` | `components.actions.flash` | Avisos pendientes de mostrar como *toast* tras el rerun. |
 | `post_id` | `ui/pages/forum.py` | Publicación abierta en vista de detalle. |
 | `profile_id` | `ui/pages/community.py` | Perfil público que se está viendo. |
 | `challenge_id` | `ui/pages/challenges.py` | Reto cuyo ranking muestra el banner derecho. |
 | `_unverified_login`, `_registered_email` | `ui/pages/login.py` | Aviso de cuenta sin activar (con el botón de reenvío) y aviso tras registrarse. |
 | `_deletion_code_sent` | `ui/pages/profile.py` | Paso 2 de la eliminación de la cuenta (código enviado). |
+| `_email_change_pending` | `ui/pages/profile.py` | Correo nuevo al que se envió el código de confirmación. |
 | `_academics_open_expanders` | `ui/pages/academics.py` | Menús abiertos del plan académico. |
 | `pensum_program`, `support_tpl`, `support_msg`, … | widgets con `key` | Estado de widgets concretos. |
 
 El estado de sesión vive en la memoria del servidor y está asociado a la conexión WebSocket del
-navegador. **Al recargar la página se pierde** y el usuario debe volver a iniciar sesión.
+navegador. **Al recargar la página se pierde**: con usuario y contraseña hay que volver a iniciar
+sesión. Con Google no, porque `st.login` guarda la sesión en una cookie firmada y
+`sync_oidc_session()` la restaura (ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md)).
 
 ### Navegación
 
@@ -198,7 +206,8 @@ archivos):
 - **Usuario con eliminación programada:** se muestra únicamente la pantalla «Tu cuenta será
   eliminada», con los botones Cancelar eliminación y Cerrar sesión.
 - **Tarea en segundo plano:** al arrancar, `main.py` llama a `start_background_purge()`. Esto
-  inicia, una vez por proceso, el hilo que purga cada hora las cuentas vencidas.
+  inicia, una vez por proceso, el hilo que purga cada hora las cuentas vencidas. El hilo usa un
+  evento de parada (`stop_background_purge`, registrado con `atexit`).
 - **Con usuario:**
   - *Plataforma:* Inicio (`/inicio`), Foros (`/foros`), Plan académico (`/academico`),
     Retos (`/retos`).
@@ -206,7 +215,7 @@ archivos):
     leídos), Mi perfil (`/perfil`).
   - *Administración* (sólo `role == "admin"`): Panel de administrador (`/admin`). Además,
     `ui/pages/admin.py` vuelve a verificar el rol al renderizar.
-- **Barra lateral:** avatar, nombre, programa y botón "Cerrar sesión", que limpia el
+- **Barra lateral:** avatar, nombre, programa (escapados como HTML) y botón "Cerrar sesión", que limpia el
   `session_state`.
   - Si el menú está oculto, se expande al pasar el mouse por el borde izquierdo (ver
     [Páginas y vistas](09-paginas-y-vistas.md#menú-lateral-expandir-al-pasar-el-mouse)).
@@ -218,7 +227,8 @@ indica ejecutar `make up` y `make init-db`.
 
 | Tipo | Dónde se origina | Cómo se muestra |
 |------|------------------|-----------------|
-| Errores de dominio: `AuthError` (y `EmailNotVerifiedError`), `AccountError`, `MailError`, `ModerationError`, `AcademicError`, `ChallengeError`, `ForumError`, `SocialError`, `ProfileError` | Validaciones en servicios | `run_action` los captura y muestra `st.error(mensaje)`. La transacción hace rollback. |
+| Errores de dominio: `AuthError` (y `EmailNotVerifiedError`), `AccountError`, `AdminError`, `MailError`, `ModerationError`, `AcademicError`, `ChallengeError`, `ForumError`, `SocialError`, `ProfileError` | Validaciones en servicios | `run_action` los captura y muestra `st.error(mensaje)`. La transacción hace rollback, salvo los que heredan de `CommitBeforeRaiseError` (p. ej. un código incorrecto, cuyo intento fallido se guarda). |
+| `IntegrityError` (fila duplicada) | Doble clic en una acción que inserta | `run_action` muestra «Esa acción ya se había realizado» y recarga. |
 | Errores de conexión a la BD (`OperationalError`) | `current_user()` en `main.py` | Mensaje con las instrucciones para levantar los servicios. |
 | Errores de conexión a Keycloak | `KeycloakClient` | Se convierten en `AuthError("No fue posible contactar…")`. |
 | Errores inesperados | Cualquier lugar | Streamlit los muestra con su traza (modo desarrollo). |

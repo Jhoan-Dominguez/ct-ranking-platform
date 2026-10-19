@@ -30,7 +30,7 @@ flowchart LR
 | Propiedad | Valor |
 |-----------|-------|
 | Imagen | `postgres:16-alpine` |
-| Puerto | `${POSTGRES_PORT:-5432}:5432` |
+| Puerto | `${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432` |
 | Volumen | `pgdata` → `/var/lib/postgresql/data` (persistente) |
 | Init scripts | `./docker/postgres` → `/docker-entrypoint-initdb.d` (sólo se ejecutan con el volumen vacío) |
 | Healthcheck | `pg_isready` cada 5 s, 20 reintentos |
@@ -42,7 +42,7 @@ flowchart LR
 |-----------|-------|
 | Imagen | `quay.io/keycloak/keycloak:26.4` |
 | Comando | `start-dev --import-realm` |
-| Puerto | `${KEYCLOAK_PORT:-8180}:8080` |
+| Puerto | `${BIND_ADDRESS:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080` |
 | BD | `KC_DB=postgres`, `jdbc:postgresql://db:5432/keycloak` |
 | Import | `./docker/keycloak` → `/opt/keycloak/data/import` (realm `ct-ranking-realm.json`) |
 | Admin de consola | `KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD` ← `KEYCLOAK_ADMIN[_PASSWORD]` |
@@ -57,7 +57,7 @@ las variables de entorno del contenedor.
 | Propiedad | Valor |
 |-----------|-------|
 | Imagen | `axllent/mailpit:v1.31.3` |
-| Puertos | `${SMTP_PORT:-1025}:1025` (SMTP) y `${MAILPIT_UI_PORT:-8025}:8025` (web) |
+| Puertos | `${SMTP_PORT:-1025}:1025` (SMTP) y `${MAILPIT_UI_PORT:-8025}:8025` (web), ambos en `${BIND_ADDRESS:-127.0.0.1}` |
 | Uso | Atrapa **todos** los correos de Keycloak y de la app, y los muestra en http://localhost:8025 sin enviarlos. |
 | Producción | Se reemplaza por un SMTP real cambiando las variables `SMTP_*` y `KEYCLOAK_SMTP_*` (ver [Cuentas y seguridad](14-cuentas-seguridad-y-moderacion.md#correo-mailpit-y-smtp)). |
 
@@ -73,7 +73,7 @@ las variables de entorno del contenedor.
 | `make dev` | `make up` + `make run`. |
 | `make down` | Detiene y elimina los contenedores. **Conserva** los volúmenes (datos). |
 | `make restart` | `down` + `up`. |
-| `make logs` | Sigue los logs de ambos contenedores (`docker compose logs -f`). |
+| `make logs` | Sigue los logs de los tres contenedores (`docker compose logs -f`). |
 | `make ps` | Estado de los contenedores. |
 | `make init-db` | Crea las tablas que falten y los datos base (idempotente). |
 | `make seed-demo` | Carga los datos de demostración (idempotente). |
@@ -137,8 +137,11 @@ El proyecto está configurado para desarrollo local. Para publicarlo:
    - Cambiar todas las credenciales y el `KEYCLOAK_CLIENT_SECRET`.
    - Poner el realm en `sslRequired: external`.
 2. **Secretos.**
-   - No usar los valores por defecto de `.env.example`.
+   - No usar los valores por defecto de `.env.example`: en especial `KEYCLOAK_CLIENT_SECRET`,
+     `KEYCLOAK_PWCHECK_CLIENT_SECRET`, `APP_SECRET_KEY` y `AUTH_COOKIE_SECRET`.
    - Gestionar `.env` fuera del repositorio. Ya está en `.gitignore`.
+   - Los puertos de Docker se publican sólo en `127.0.0.1` (`BIND_ADDRESS`). Mailpit no tiene
+     contraseña y muestra todos los códigos y enlaces: nunca debe quedar expuesto.
 3. **Contenerizar la app.**
    - Crear un `Dockerfile` con `python:3.13-slim` que instale `requirements.txt` y ejecute
      `streamlit run app/main.py --server.address 0.0.0.0`.

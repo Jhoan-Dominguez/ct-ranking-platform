@@ -8,13 +8,14 @@ Componentes compartidos (`app/ui/components/`):
 
 | Módulo | Funciones | Uso |
 |--------|-----------|-----|
-| `session.py` | `current_user()`, `require_user()`, `logout()`, `sync_oidc_session()` | Recargan el usuario autenticado (si no hay sesión, detienen el render), cierran la sesión (también la de Google/Keycloak) y, al volver de Google, inician sesión o crean la cuenta según el botón usado (proveedores `google` / `googlesignup`). |
-| `actions.py` | `run_action(fn, mensaje)`, `flash()`, `show_flashes()`, `USER_ERRORS` | Ejecuta una escritura en su propia transacción (ver [Persistencia](07-persistencia.md#escritura-actionsrun_action)). Los avisos tipo *toast* sobreviven al rerun. |
-| `formatting.py` | `fmt_grade()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, fechas (zona horaria local) y etiquetas de categoría. |
-| `widgets.py` | `avatar_html()`, `user_chip()`, `institutional_email_input()` | Foto o iniciales, nombre visible y `@usuario`. Campo de correo con el dominio institucional fijo. |
+| `session.py` | `start_session()`, `current_user()`, `require_user()`, `logout()`, `sync_oidc_session()` | Inician la sesión, recargan el usuario autenticado una vez por ejecución (`require_user` reutiliza el de `main.py`; si no hay sesión, detienen el render), aplican el vencimiento `SESSION_TTL_HOURS`, cierran la sesión (también la de Google/Keycloak) y, al volver de Google, inician sesión o crean la cuenta según el botón usado (proveedores `google` / `googlesignup`). Si el ingreso con Google falla, no lo reintentan en cada rerun. |
+| `actions.py` | `run_action(fn, mensaje)`, `flash()`, `show_flashes()`, `USER_ERRORS` | Ejecuta una escritura en su propia transacción (ver [Persistencia](07-persistencia.md#escritura-actionsrun_action)). Los avisos tipo *toast* sobreviven al rerun. Un `IntegrityError` por doble clic se muestra como aviso. |
+| `formatting.py` | `fmt_grade()`, `grade_color()`, `fmt_dt()`, `CATEGORY_LABELS` | Formato de notas, color de una nota (una nota de `0.0` es roja, no «sin nota»), fechas (zona horaria local) y etiquetas de categoría. |
+| `widgets.py` | `avatar_html()`, `user_chip()`, `institutional_email_input()` | Foto o iniciales, nombre visible y `@usuario`. La foto se lee aparte y queda en caché (`st.cache_data`) hasta que cambia. `user_chip` escapa como HTML el nombre, el usuario **y el subtítulo**, que puede traer datos de otros usuarios. Campo de correo con el dominio institucional fijo. |
 | `charts.py` | `credits_chart()`, `averages_chart()` | Avance de créditos por categoría y evolución del promedio. Las usan el Plan académico y el panel de administrador. |
 | `rankings.py` | `challenge_ranking_banner()`, `leaderboard_banner()` | Ranking de un reto (participantes, % de éxito, primero en completar, orden) y ranking por puntos (general, de amigos o de un grupo). |
 | `moderation.py` | `actions_menu()`, `report_dialog()`, `block_dialog()` | Menú «Más» con Reportar y Bloquear, y sus diálogos. Se usa en Personas, Foros y Mensajes. |
+| `support.py` | `support_dialog()` | Diálogo para enviar un mensaje de apoyo. Se usa en Personas y Mensajes. |
 | `sidebar.py` | `enable_sidebar_hover()` | Inyecta `app/ui/assets/sidebar_hover.js`: con el menú lateral oculto, pasar el mouse por el borde izquierdo lo expande. |
 
 ### Menú lateral: expandir al pasar el mouse
@@ -73,7 +74,7 @@ eliminación** (`accounts.cancel_deletion`) o **Cerrar sesión**.
 | Sección | Contenido | Servicios |
 |---------|-----------|-----------|
 | Al cargar | Re-evalúa los retos automáticos; si se completó alguno, muestra un toast y globos 🎈. | `challenges.refresh_automatic` |
-| Métricas | Promedio general, promedio del semestre actual, puntos en retos, posición en el ranking, seguidores y seguidos. | `academics.user_summary`, `challenges.leaderboard`, `social.follow_counts` |
+| Métricas | Promedio general, promedio del semestre actual, puntos en retos, posición en el ranking, seguidores y seguidos (sin contar cuentas ocultas). | `academics.user_summary`, `challenges.standing`, `social.follow_counts` |
 | 🏆 Mis retos en curso | Retos abiertos en los que participo y aún no completo, con barra de progreso si tienen regla. | `challenges.list_challenges(scope="joined")`, `challenge_rules.progress` |
 | 💬 Últimas discusiones | Las 5 publicaciones más recientes, con conteo de comentarios y "me gusta". | `forum.list_posts` |
 | 💌 Apoyos recibidos | Los últimos 5 mensajes. | `social.inbox` |
@@ -255,8 +256,10 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
     rellenan el texto, que se puede editar antes de enviar (`social.send_support`).
   - **Perfil.**
 - **Perfil público** (`session_state.profile_id`):
-  - Foto, nombre, biografía, programa, universidad, ciudad, intereses y enlaces.
-  - Métricas: seguidores, siguiendo, semestre, puntos y retos completados.
+  - Foto, nombre, biografía, programa, universidad, ciudad, intereses y enlaces (sólo se
+    muestran enlaces `http(s)://`).
+  - Métricas: seguidores, siguiendo (sin cuentas ocultas), semestre, puntos y retos completados
+    (`challenges.standing`).
   - Botones de acción y lista de retos completados.
   - **Las notas y promedios no se muestran a otros estudiantes.**
 
@@ -299,7 +302,7 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
   actual y total de semestres.
 - **Pestaña "Cuenta y seguridad":**
   - Usuario (sólo lectura).
-  - Cambio de correo (`auth.change_email`). Los estudiantes sólo editan la parte antes de la @ del correo institucional; los administradores, el correo completo.
+  - Cambio de correo en dos pasos: se escribe el correo nuevo (`accounts.request_email_change`, que le envía un código) y luego el código (`accounts.confirm_email_change`). El correo no cambia hasta confirmar. Los estudiantes sólo editan la parte antes de la @ del correo institucional; los administradores, el correo completo.
   - Cambio de contraseña: actual, nueva, confirmación y código 2FA si está activo
     (`auth.change_password`).
   - **Verificación en dos pasos (2FA):**
@@ -319,7 +322,9 @@ además `posts`, `comments`, `grade_items`, `subjects` y `support_messages`.
 ## 🛡️ Panel de administrador (`ui/pages/admin.py`, `/admin`)
 
 Sólo está disponible para `role == "admin"`. La página vuelve a verificar el rol y detiene el
-render si no corresponde. Tiene cinco pestañas:
+render si no corresponde. Tiene seis pestañas. Streamlit ejecuta todas en cada rerun, así que la
+tabla de estudiantes (`admin.students_frame`, la consulta más pesada) se calcula una sola vez y
+la comparten Resumen, Grupos y Usuarios:
 
 | Pestaña | Contenido |
 |---------|-----------|
@@ -330,5 +335,6 @@ render si no corresponde. Tiene cinco pestañas:
 | **Reportes** | El título muestra los pendientes, p. ej. «Reportes (2)». Filtro por estado (Pendientes, Resueltos, Descartados, Todos), tabla de reportes y revisión de cada uno: contenido reportado, nota y acciones **Resolver**, **Descartar**, **Eliminar contenido** y **Deshabilitar usuario**. Ver [Cuentas y moderación](14-cuentas-seguridad-y-moderacion.md#reportar-usuarios-y-contenido). |
 | **Usuarios** | Tabla de todos los usuarios; selector para cambiar el rol (estudiante o administrador) y habilitar o deshabilitar la cuenta. Con Keycloak, la cuenta también se deshabilita allá. Un admin no puede cambiar su propio rol ni deshabilitarse a sí mismo. La tabla incluye correo verificado, fecha de eliminación programada y reportes recibidos. Si la cuenta tiene eliminación programada, se puede **cancelar**. |
 
-**Servicios:** `admin.*`, `academics`, `forum.delete_*`, `challenges.delete_challenge`,
-`auth.set_active` y `challenges.leaderboard`. **Tablas:** todas.
+**Servicios:** `admin.*` (las acciones de gestión reciben al admin que las hace), `academics`,
+`forum.delete_*`, `challenges.delete_challenge`, `auth.set_active`, `users.list_users`,
+`moderation.reports_against_counts` y `challenges.leaderboard`. **Tablas:** todas.

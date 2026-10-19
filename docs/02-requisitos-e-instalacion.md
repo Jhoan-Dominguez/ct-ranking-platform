@@ -68,17 +68,22 @@ Detalle de lo que hace cada paso:
    - `pre-commit install`: instala el hook en `.git/hooks/pre-commit`.
 2. **`make up`** ejecuta:
    - `docker compose up -d`: levanta los contenedores `db`, `keycloak` y `mailpit`.
-   - `scripts/wait_for_services.py`: hace polling hasta que PostgreSQL acepta conexiones y
+   - `python -m scripts.wait_for_services`: hace polling hasta que PostgreSQL acepta conexiones y
      Keycloak publica el realm `ct-ranking`. El tiempo máximo es 180 s.
-   - `scripts/configure_keycloak.py`: aplica al realm el servidor SMTP (para los correos de
-     activación y de 2FA) y las URLs de la app. Usa las credenciales de la consola
-     (`KEYCLOAK_ADMIN`) y es idempotente.
-   - `python -m app.database.init_db`: crea las tablas que falten, agrega las columnas nuevas a las
-     tablas existentes, el usuario administrador local y los 10 retos globales. Es idempotente.
+   - `python -m scripts.configure_keycloak`: aplica al realm el servidor SMTP (para los correos
+     de activación y de 2FA), las URLs de la app, el cliente de verificación de contraseña y el
+     proveedor Google. Usa las credenciales de la consola (`KEYCLOAK_ADMIN`) y es idempotente.
+   - `python -m scripts.write_streamlit_secrets`: genera `.streamlit/secrets.toml` (permisos
+     `600`).
+   - `python -m app.database.init_db`: crea las tablas que falten, agrega las columnas, índices y
+     restricciones nuevas a las tablas existentes, el usuario administrador local y los 10 retos
+     globales. Es idempotente.
+   - Los scripts se ejecutan como módulos (`python -m scripts.<nombre>`) desde la raíz del
+     proyecto, así importan `app` sin modificar `sys.path`.
 3. **`make seed-demo`** ejecuta `python -m app.database.init_db --demo`. Ver
    [Datos iniciales y demo](11-datos-iniciales-y-demo.md).
 4. **`make run`** genera `.streamlit/secrets.toml` (configuración de `st.login`, con
-   `scripts/write_streamlit_secrets.py`) y ejecuta `streamlit run app/main.py --server.port $APP_PORT`.
+   `python -m scripts.write_streamlit_secrets`) y ejecuta `streamlit run app/main.py --server.port $APP_PORT`.
 
 ## Variables de entorno (`.env`)
 
@@ -88,6 +93,7 @@ prioridad sobre las de `.env`.
 
 | Variable | Valor por defecto | Usada por | Descripción |
 |----------|-------------------|-----------|-------------|
+| `BIND_ADDRESS` | `127.0.0.1` | compose | Interfaz donde se publican los puertos de PostgreSQL, Keycloak y Mailpit. Por defecto sólo este equipo; `0.0.0.0` los expone a la red. |
 | `POSTGRES_USER` | `ctranking` | app, db, keycloak | Usuario de PostgreSQL. |
 | `POSTGRES_PASSWORD` | `ctranking` | app, db, keycloak | Contraseña de PostgreSQL. |
 | `POSTGRES_DB` | `ctranking` | app, db | Base de datos de la aplicación. |
@@ -119,6 +125,8 @@ prioridad sobre las de `.env`.
 | `MAILPIT_UI_PORT` | `8025` | compose | Puerto de la bandeja web de Mailpit. |
 | `MAIL_BACKEND` | `smtp` | app | `smtp` envía correos; `memory` los guarda en memoria (pruebas). |
 | `ACCOUNT_DELETION_DAYS` | `7` | app | Días de espera antes de borrar definitivamente una cuenta. |
+| `APP_SECRET_KEY` | *(vacío)* | app | Clave HMAC de los códigos que la app envía por correo. **Obligatoria en producción**; vacía, se usa `KEYCLOAK_CLIENT_SECRET` (sólo desarrollo). |
+| `SESSION_TTL_HOURS` | `12` | app | Horas que dura una sesión iniciada con usuario y contraseña. `0` = sin límite. |
 | `STUDENT_EMAIL_DOMAIN` | `estudiantes.areandina.edu.co` | app | Dominio obligatorio del correo de los **estudiantes** (registro y cambio de correo). Los administradores están exentos. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(vacío)* | Keycloak (vía `configure_keycloak.py`) | Credenciales OAuth de Google Cloud. Vacío = sin «Continuar con Google». Ver [Inicio de sesión con Google](15-inicio-sesion-con-google.md). |
 | `AUTH_COOKIE_SECRET` | *(vacío → aleatorio)* | app (`secrets.toml`) | Secreto para firmar la cookie de sesión de `st.login`. Si queda vacío, se genera uno y se conserva en `.streamlit/secrets.toml`. |
@@ -144,7 +152,7 @@ prioridad sobre las de `.env`.
 ## Verificación de la instalación
 
 ```bash
-make ps                                   # ambos contenedores "running"
+make ps                                   # los tres contenedores (db, keycloak, mailpit) "running"
 curl -s localhost:8180/realms/ct-ranking  # JSON del realm
 curl -s localhost:8501/_stcore/health     # "ok" (con make run activo)
 make test                                 # todas las pruebas en verde

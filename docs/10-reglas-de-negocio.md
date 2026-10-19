@@ -27,7 +27,8 @@ Sea una materia con ítems de nota *gᵢ* y porcentaje *wᵢ*:
   Ejemplo: Parcial 1 = 5,0 (30 %) y Parcial 2 = 2,5 (20 %). La nota es
   (1,5 + 0,5) / 0,5 = **4,0**, con un 50 % evaluado.
 
-- **En otro caso**, si algún ítem no tiene porcentaje, se usa el promedio simple:
+- **En otro caso**, si algún ítem no tiene porcentaje, se usa el promedio simple. En el
+  formulario, un porcentaje de `0` significa «sin porcentaje» (se guarda como `NULL`):
   `nota = Σ gᵢ / n`.
 - **Sin ítems**, la materia no tiene nota (`—`) y no cuenta en los promedios.
 
@@ -166,8 +167,17 @@ alfabético. Existen tres variantes:
 - **Entre amigos:** las personas que sigo, más yo.
 - **De grupo:** los usuarios filtrados en el panel de administrador.
 
-El bonus se calcula considerando a **todos** los participantes del reto. Si el ganador real no
-está en el grupo filtrado, nadie del grupo recibe ese bonus.
+El bonus se calcula considerando a **todos** los participantes activos del reto. Si el ganador
+real no está en el grupo filtrado, nadie del grupo recibe ese bonus.
+
+Las cuentas con **eliminación programada** no cuentan en el ranking, ni siquiera para decidir
+quién fue primero: si quien terminó primero solicita eliminar su cuenta, el bono pasa al
+siguiente participante activo (y vuelve a él si cancela la eliminación).
+
+El cálculo se hace en SQL: `ROW_NUMBER() OVER (PARTITION BY reto ORDER BY completed_at)` marca al
+primero de cada reto, el bono `ceil(puntos × 0,5)` se calcula con aritmética entera
+(`(puntos + 1) // 2`) y el orden y el `LIMIT` los aplica la base de datos. `challenges.standing`
+devuelve el puntaje y la posición de un solo usuario con la misma consulta.
 
 ## Foros
 

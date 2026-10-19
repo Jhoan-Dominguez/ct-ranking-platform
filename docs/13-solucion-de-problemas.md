@@ -2,7 +2,7 @@
 
 | Síntoma | Causa probable | Solución |
 |---------|----------------|----------|
-| `make up` falla con *Bind for 0.0.0.0:8180 failed: port is already allocated* (o 5432) | Otro proceso o contenedor usa el puerto. | Cambia `KEYCLOAK_PORT` **y** `KEYCLOAK_URL`, o `POSTGRES_PORT`, en `.env` y repite `make up`. Para ver quién lo usa: `docker ps --format '{{.Names}} {{.Ports}}'` o `ss -ltn`. |
+| `make up` falla con *Bind for 127.0.0.1:8180 failed: port is already allocated* (o 5432) | Otro proceso o contenedor usa el puerto. | Cambia `KEYCLOAK_PORT` **y** `KEYCLOAK_URL`, o `POSTGRES_PORT`, en `.env` y repite `make up`. Para ver quién lo usa: `docker ps --format '{{.Names}} {{.Ports}}'` o `ss -ltn`. |
 | `wait_for_services.py` termina con "Keycloak no respondió en 180s" | Primer arranque lento, falta de memoria o error al importar el realm. | `make logs`. Busca errores de import del realm o de conexión a PostgreSQL. En equipos lentos vuelve a ejecutar `make up`. |
 | La app muestra "No hay conexión con la base de datos" | Los contenedores no están levantados. | `make up` (o `make ps` para verificar su estado). |
 | Login: "No fue posible contactar el servidor de autenticación (Keycloak)" | Keycloak no está arriba o `KEYCLOAK_URL` es incorrecta. | `make ps`; `curl $KEYCLOAK_URL/realms/ct-ranking`. |
@@ -12,7 +12,10 @@
 | Login: "La cuenta está deshabilitada" | Un administrador la deshabilitó. | *Panel → Usuarios → Habilitar cuenta*, o actívala en la consola de Keycloak. |
 | El usuario demo existe en Keycloak pero no en la app tras `make reset-db` | `reset-db` borra sólo la BD de la app. | `make seed-demo` recrea las filas locales, que se vinculan en el primer login. |
 | `sqlalchemy … column "category" does not exist` (u otra columna) | Se actualizó el código con columnas nuevas y no hay migraciones. | `make reset-db && make seed-demo` (pierde los datos de la app), o agrega la columna con `ALTER TABLE`. |
-| Al recargar el navegador se cierra la sesión | La sesión vive en `st.session_state`, que es por conexión. | Es el comportamiento esperado. Vuelve a iniciar sesión. |
+| Al recargar el navegador se cierra la sesión | Con usuario y contraseña, la sesión vive en `st.session_state`, que es por conexión. | Es el comportamiento esperado. Vuelve a iniciar sesión. Con Google la sesión sí persiste (cookie de `st.login`). |
+| «Tu sesión venció. Inicia sesión de nuevo.» | Pasaron más de `SESSION_TTL_HOURS` horas (12 por defecto) desde el login con contraseña. | Inicia sesión otra vez, o ajusta `SESSION_TTL_HOURS` en `.env` (`0` = sin límite). |
+| «Ya te enviamos un código hace un momento» / «Espera un minuto» | Entre dos correos con código o enlace debe pasar un minuto. | Espera y vuelve a pedirlo. |
+| `init_db` falla al crear `uq_users_alias_lower` | Hay dos usuarios con el mismo alias sin distinguir mayúsculas (datos anteriores a la restricción). | Cambia uno de los alias (`UPDATE users SET alias = '' WHERE id = …`) y repite `make init-db`. |
 | La foto de perfil no se sube | Supera 5 MB o no es una imagen válida. | Usa png, jpg o webp de menos de 5 MB. |
 | "La suma de porcentajes de la materia superaría el 100%" | Los ítems ya suman cerca de 100 %. | Ajusta los porcentajes existentes o deja el nuevo ítem en 0 % (promedio simple). |
 | No veo un reto de un compañero | El reto es "sólo seguidores". | Sigue al creador desde **Personas**. |

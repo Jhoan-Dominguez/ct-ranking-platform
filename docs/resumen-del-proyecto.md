@@ -24,8 +24,9 @@ entre sí. Un panel de administrador permite hacer seguimiento a un estudiante o
 
 | Capa | Carpeta | Responsabilidad |
 |------|---------|-----------------|
-| Configuración | `app/core/config.py` | Lee `.env` (BD, Keycloak, escala de notas). |
-| Datos | `app/db/` | Modelos ORM (`models.py`), sesión (`session.py`), creación del esquema y datos base (`init_db.py`), datos demo (`demo_data.py`). |
+| Configuración y transversales | `app/core/` | `config.py` lee `.env` (BD, Keycloak, escala de notas, secretos); `mailer.py` envía correos; `ratelimit.py` limita intentos. |
+| Identidad | `app/auth/` | Login (Keycloak o local), registro, 2FA, Google, cambio de correo verificado y eliminación diferida. |
+| Datos | `app/database/` | Modelos ORM (`models.py`), sesión (`session.py`), creación y actualización del esquema (`init_db.py`) y datos de referencia en `seeds/` (`base.py`, `demo.py`, `pensums.py`). |
 | Lógica de negocio | `app/services/` | Reglas y validaciones, sin dependencias de Streamlit. Es lo que cubren las pruebas. |
 | Interfaz | `app/ui/pages/`, `app/ui/` | Una vista por página y componentes compartidos (avatares, banners de ranking, `run_action`). |
 | Entrada | `app/main.py` | Navegación (`st.navigation`), barra lateral y control de sesión. |
@@ -181,10 +182,14 @@ intercambiables con `AUTH_PROVIDER`:
   - Se activa desde Mi perfil: llega un enlace por correo a la página de Keycloak con el QR para
     Google Authenticator, Microsoft Authenticator o FreeOTP.
   - Luego el login pide el código.
+- **Cambiar el correo:** el correo nuevo sólo se guarda después de escribir el código de 6
+  dígitos que se le envía. Se avisa al correo anterior.
 - **Eliminar la cuenta:**
-  - Requiere la contraseña (+ código 2FA) y un código de 6 dígitos enviado al correo.
+  - Requiere la contraseña (+ código 2FA) y un código de 6 dígitos enviado al correo (5
+    intentos por código, un código por minuto).
   - La cuenta queda **desactivada y oculta 7 días**: al iniciar sesión sólo se puede cancelar.
-  - Al vencer el plazo, se borra de la app y de Keycloak.
+  - Al vencer el plazo, se borra de la app y de Keycloak. Sus retos de la comunidad se borran;
+    los globales se conservan para no quitarles puntos a los demás.
 - **Bloquear y reportar** usuarios, publicaciones y comentarios. Los reportes llegan al panel de
   administrador.
 - **Correo:**
@@ -226,7 +231,46 @@ intercambiables con `AUTH_PROVIDER`:
   distintos niveles: recién ingresados (semestre 1), iniciando (2–3), a mitad de carrera (5–6) y
   a punto de terminar (8–9). Tienen historia académica completa con notas, materias repetidas y
   un estudiante en riesgo.
-- **Pruebas automatizadas** con pytest sobre SQLite en memoria (`make test`).
+- **Pruebas automatizadas** con pytest sobre SQLite en memoria (`make test`), incluidas las
+  pruebas de regresión de la auditoría (`tests/test_audit_validation.py`).
+
+## 3.1 Correcciones de la auditoría técnica
+
+La auditoría (`AUDITORIA.md`) encontró defectos funcionales, de seguridad, de modelado y de
+rendimiento. Lo corregido:
+
+- **Seguridad:**
+  - Google ya no puede vincular una cuenta por coincidencia de username (antes permitía tomar
+    la cuenta de otro estudiante). Se vincula sólo por `keycloak_id` o correo verificado.
+  - El cambio de correo exige un código enviado al correo nuevo.
+  - El límite de 5 intentos de los códigos se cumple (antes el rollback borraba los intentos).
+  - Todo texto de usuario que se inserta como HTML se escapa (chips, barra lateral, correos),
+    y los enlaces del perfil deben ser `http(s)://`.
+  - El token del cliente `ct-ranking-pwcheck` (que no pide 2FA) ya no tiene roles ni audiencia.
+  - Límites de intentos: login local, reenvío de correos de Keycloak y códigos por correo.
+  - Las sesiones con contraseña vencen (`SESSION_TTL_HOURS`). Los puertos de Docker se publican
+    sólo en `127.0.0.1`, `secrets.toml` se escribe con permisos `600` y los códigos usan su
+    propia clave HMAC (`APP_SECRET_KEY`).
+  - Los servicios de administración verifican que quien actúa sea admin.
+- **Funcionalidad:**
+  - El rol se administra en la app: degradar a un admin desde el panel persiste.
+  - Los admins pueden entrar con Google aunque su correo no sea institucional.
+  - Cargar el pensum no duplica materias registradas con otro código.
+  - Una nota de `0.0` se muestra en rojo y el promedio semestral `0.00` ya no se oculta.
+  - Las cuentas en eliminación no se quedan con el bono de «primero» ni cuentan en los conteos
+    de comentarios, "me gusta" y seguidores.
+  - Una regla de reto desconocida no rompe Inicio ni Retos; una cuenta de Google deshabilitada
+    cierra su sesión en lugar de reintentar en cada recarga.
+- **Modelo de datos:** `challenges.creator_id` con `ON DELETE SET NULL`, avatar diferido,
+  índices en las FK y columnas consultadas en cada rerun, índices funcionales `lower()`, alias
+  único en la BD y restricciones `CHECK` nuevas. `init_db` las aplica sobre una BD existente.
+- **Rendimiento:** ranking calculado en SQL (con `standing` para un solo usuario), conteos de
+  retos en SQL, métricas del panel en una consulta, tabla de estudiantes calculada una vez por
+  rerun, sin N+1 en reportes, token de Keycloak en caché con conexiones reutilizadas, foto de
+  perfil en caché y usuario actual cargado una vez por rerun.
+- **Prácticas:** sin consultas ORM en las páginas, `support_dialog` como componente, scripts
+  ejecutados con `python -m` (sin `sys.path.insert`), la purga hace cada cuenta en un
+  *savepoint* y el registro deshace el usuario de Keycloak si la BD falla.
 
 ## 4. Cómo ejecutarlo
 
@@ -274,11 +318,14 @@ make down        # detiene los contenedores (conserva datos)
 
 ## 5. Limitaciones conocidas e ideas futuras
 
-- La sesión vive en `st.session_state`: al recargar el navegador hay que volver a iniciar sesión.
-  Una mejora sería usar el flujo *Authorization Code* de Keycloak con `st.login` (OIDC) y cookies.
-- El esquema se crea con `create_all`. Las columnas nuevas se agregan con sentencias
-  idempotentes (`COLUMN_UPGRADES` en `init_db`). Para cambios más complejos en producción
-  conviene usar **Alembic**.
+- Con usuario y contraseña, la sesión vive en `st.session_state`: al recargar el navegador hay
+  que volver a iniciar sesión. Con Google sí persiste (cookie de `st.login`).
+- El esquema se crea con `create_all`. Las columnas, índices y restricciones nuevas se aplican
+  con sentencias idempotentes (`SCHEMA_UPGRADES` y `CHECK_UPGRADES` en `init_db`). Para cambios
+  más complejos en producción conviene usar **Alembic**.
+- Las etiquetas del foro y los intereses se guardan como texto separado por comas, y cargar un
+  pensum copia sus materias a cada estudiante (no hay tabla de catálogo). Se mantuvo así por
+  simplicidad; normalizarlo exige migrar datos.
 - El 2FA y la activación por correo sólo funcionan con `AUTH_PROVIDER=keycloak`. El proveedor
   local no los tiene.
 - El pensum no indica créditos. Los créditos y categorías se asignaron como estimación en

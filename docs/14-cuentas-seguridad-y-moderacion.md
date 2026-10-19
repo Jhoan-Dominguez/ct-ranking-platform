@@ -24,7 +24,7 @@ Hay dos emisores de correo. Ambos usan el mismo servidor SMTP:
 | Emisor | Correos | Configuración |
 |--------|---------|---------------|
 | **Keycloak** | Verificación de cuenta («Verificación de email») y configuración del 2FA («Actualiza tu cuenta») | SMTP del realm, que aplica `scripts/configure_keycloak.py` en cada `make up`. Usa `KEYCLOAK_SMTP_HOST` y `KEYCLOAK_SMTP_PORT`, con valor por defecto `mailpit:1025` dentro de la red de Docker. |
-| **La app** (`app/core/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada y aviso de cancelación | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `localhost:1025`. |
+| **La app** (`app/core/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada, aviso de cancelación, código para confirmar un correo nuevo y aviso de cambio de correo | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `localhost:1025`. |
 
 **En desarrollo**, Mailpit (`axllent/mailpit:v1.31.3`) atrapa todos los correos sin enviarlos a
 nadie. Para verlos, abre **http://localhost:8025**. Sus enlaces (activación y 2FA) funcionan
@@ -45,10 +45,12 @@ Los estudiantes deben usar el correo de **`@estudiantes.areandina.edu.co`** (con
 - **En el formulario** de registro y en *Mi perfil → Cuenta y seguridad* sólo se escribe la
   parte antes de la @. El dominio se muestra fijo al lado. Si se escribe una @ o caracteres no
   válidos, aparece un error.
-- **En el servicio**, `auth.register` y `auth.change_email` rechazan cualquier otro dominio
-  (incluidos otros subdominios como `@areandina.edu.co`). Así la regla no se puede saltar
-  aunque se llame al servicio desde otro lugar.
-- **Administradores:** están exentos. El admin conserva `APP_ADMIN_EMAIL`.
+- **En el servicio**, `auth.register`, `auth.validate_new_email` (cambio de correo) y
+  `auth.login_with_oidc` rechazan cualquier otro dominio (incluidos otros subdominios como
+  `@areandina.edu.co`). Así la regla no se puede saltar aunque se llame al servicio desde otro
+  lugar.
+- **Administradores:** están exentos, también al entrar con Google. El admin conserva
+  `APP_ADMIN_EMAIL`.
 - **Usuarios existentes:** `make migrate-emails` cambia su correo a
   `<usuario>@estudiantes.areandina.edu.co` en la app y en Keycloak. `ARGS=--dry-run` muestra los
   cambios sin aplicarlos. Es idempotente.
@@ -81,7 +83,8 @@ sequenceDiagram
   contraseña.
 - **Reenviar el enlace.** Hay dos formas: el botón que aparece tras el intento de login, o el
   expander «¿No recibiste el correo de activación?». La respuesta es siempre la misma, exista o
-  no la cuenta, para no revelar qué cuentas existen.
+  no la cuenta, para no revelar qué cuentas existen. Se permite un reenvío por minuto para cada
+  usuario o correo escrito (el límite no depende de si la cuenta existe).
 - **Mientras no se activa:** el usuario no aparece en la búsqueda de Personas
   (`users.email_verified = false`).
 - **Si falla el envío del correo durante el registro:** la cuenta se crea igual, y el enlace se
@@ -96,7 +99,7 @@ sequenceDiagram
 
 1. **Mi perfil → Cuenta y seguridad → «Enviar enlace de configuración».** La app llama a
    `PUT /users/{id}/execute-actions-email` con `["CONFIGURE_TOTP"]`. El enlace es válido por
-   12 horas.
+   12 horas. Se puede pedir un enlace por minuto.
 2. **El estudiante abre el correo «Actualiza tu cuenta» → «Click here to proceed».** Keycloak
    muestra el **código QR**, y también la clave en texto si no se puede escanear.
 3. **Escanea el QR con su app autenticadora** y escribe en esa página el código de 6 dígitos para
@@ -136,11 +139,17 @@ sequenceDiagram
   - Por eso `scripts/configure_keycloak.py` crea el flujo **«direct grant - solo contraseña»**:
     una copia sin el paso *Conditional OTP*.
   - Ese flujo lo usa el cliente **`ct-ranking-pwcheck`**, cuyos tokens duran 60 s y se descartan.
+  - Como ese flujo no exige el código, sus tokens **no sirven para nada más**: el cliente tiene
+    `fullScopeAllowed: false` y sólo el client scope `basic`, así que el token no lleva roles
+    ni audiencia y la API de cuenta de Keycloak lo rechaza (401). `configure_keycloak.py` lo
+    aplica en cada `make up`.
+  - En producción, cambia `KEYCLOAK_PWCHECK_CLIENT_SECRET` (y el resto de secretos de ejemplo).
   - El ingreso real (paso 2) siempre pasa por el cliente principal, donde **Keycloak valida el
     código**.
 - **Datos entre pasos.** Entre el paso 1 y el 2, el usuario y la contraseña quedan sólo en la
   memoria de la sesión del servidor (`st.session_state`), como máximo **5 minutos**. Se borran
-  al entrar, al pulsar «Volver» o al vencer el plazo.
+  al entrar, al pulsar «Volver» o al vencer el plazo. No hay alternativa con el flujo *direct
+  grant*: Keycloak valida contraseña y código en la misma petición.
 - **Mensajes:** «Usuario o contraseña incorrectos» (paso 1) y «El código no es correcto o ya
   venció» (paso 2).
 - La única excepción es el bloqueo temporal por **fuerza bruta**. Ese estado se consulta aparte
@@ -180,11 +189,16 @@ stateDiagram-v2
    - Se piden la contraseña y el código 2FA si lo tiene. Se validan con un login contra Keycloak.
    - Se invalidan los códigos anteriores y se envía un **código de 6 dígitos** al correo,
      válido **15 minutos**.
-   - El código se guarda como `HMAC-SHA256(código, secreto del servidor)` en
-     `verification_codes`, nunca en claro.
+   - El código se guarda como `HMAC-SHA256(código, APP_SECRET_KEY)` en `verification_codes`,
+     nunca en claro. Define `APP_SECRET_KEY` en producción; si está vacía se usa el secreto del
+     cliente de Keycloak (aceptable sólo en desarrollo).
+   - Entre dos códigos debe pasar al menos **un minuto**, para que nadie pueda llenar el buzón
+     del estudiante.
 2. **Paso 2: confirmación.**
    - El usuario escribe el código y marca «Entiendo que…».
-   - Hay un máximo de **5 intentos** por código.
+   - Hay un máximo de **5 intentos** por código. Cada intento fallido se guarda aunque la acción
+     termine en error (`InvalidCodeError` hereda de `CommitBeforeRaiseError`), así el límite se
+     cumple de verdad.
    - Al confirmar, la eliminación queda programada para dentro de `ACCOUNT_DELETION_DAYS` días
      (`users.deletion_scheduled_for`), se envía un correo con la fecha y **se cierra la sesión**.
 3. **Durante el plazo, la cuenta está desactivada:**
@@ -193,8 +207,12 @@ stateDiagram-v2
    - Si inicia sesión, **sólo** ve la pantalla «Tu cuenta será eliminada» con **Cancelar
      eliminación**. Un administrador también puede cancelarla desde *Panel → Usuarios*.
 4. **Al vencer el plazo, la purga:**
-   - `purge_due_accounts` borra al usuario en **Keycloak** y en la app. Con las claves foráneas en
-     `ON DELETE CASCADE` se borra todo su contenido.
+   - `purge_due_accounts` borra al usuario en la app y en **Keycloak**, cada cuenta en un
+     *savepoint*: si Keycloak falla, esa cuenta se revierte y se reintenta en la siguiente
+     ejecución, sin afectar a las demás.
+   - Se borran sus retos de la comunidad y, con las claves foráneas en `ON DELETE CASCADE`, el
+     resto de su contenido. Los **retos globales** que hubiera creado (p. ej. un admin) se
+     conservan con `creator_id = NULL`, para no quitarles los puntos a los demás.
    - Se ejecuta de dos formas:
      - un **hilo en segundo plano** que la app inicia una vez por proceso y que corre cada hora
        (`app/jobs/purge_accounts.py`);
@@ -205,6 +223,29 @@ Ejemplo de cron para producción:
 ```cron
 15 3 * * * cd /ruta/ct-ranking-platform && .venv/bin/python -m app.jobs.purge_accounts
 ```
+
+## Cambio de correo (verificado)
+
+El correo sólo cambia cuando se demuestra que se controla el nuevo:
+
+1. *Mi perfil → Cuenta y seguridad → Cambiar correo.* `accounts.request_email_change` valida el
+   correo (dominio institucional, distinto del actual y libre) y envía un **código de 6 dígitos**
+   a la dirección **nueva**. Mismas reglas que el código de eliminación: 15 minutos, 5 intentos,
+   un código por minuto.
+2. El estudiante escribe el código. `accounts.confirm_email_change` vuelve a comprobar que el
+   correo siga libre, lo guarda (en Keycloak con `emailVerified=true`) y envía un aviso al correo
+   **anterior**.
+
+Así nadie puede apropiarse del correo institucional de un compañero que aún no se registró.
+
+## Límites de intentos
+
+| Acción | Límite | Dónde |
+|--------|--------|-------|
+| Código de eliminación o de cambio de correo | 5 intentos por código; 1 código por minuto | `auth/accounts.py` (en la BD) |
+| Reenviar la activación / enlace del 2FA | 1 correo por minuto | `core/ratelimit.py` (memoria) |
+| Login local (`AUTH_PROVIDER=local`) | 5 fallos seguidos → 5 minutos de bloqueo | `core/ratelimit.py` (memoria) |
+| Login con Keycloak | Protección contra fuerza bruta del realm | Keycloak |
 
 ## Bloquear usuarios
 
