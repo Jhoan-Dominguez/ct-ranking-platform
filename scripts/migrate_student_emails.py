@@ -3,19 +3,15 @@
 Para cada estudiante (no administrador) cuyo correo no termina en ``@STUDENT_EMAIL_DOMAIN``,
 el nuevo correo es ``<usuario>@STUDENT_EMAIL_DOMAIN``. Se actualiza en la app y en Keycloak.
 
-Uso: ``python scripts/migrate_student_emails.py [--dry-run]``
+Uso: ``python -m scripts.migrate_student_emails [--dry-run]`` (o ``make migrate-emails``)
 (``make migrate-emails`` / ``make migrate-emails ARGS=--dry-run``)
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
 
 from sqlalchemy import func, select
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import auth
 from app.core.config import get_settings

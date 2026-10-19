@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import sys
 import time
-from pathlib import Path
 
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import get_settings
 

@@ -10,12 +10,9 @@ a Google sin mostrar su propia página de login.
 
 from __future__ import annotations
 
+import os
 import secrets
-import sys
 import tomllib
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import ROOT_DIR, get_settings
 
@@ -57,7 +54,11 @@ def main() -> None:
             "",
         ]
     SECRETS_FILE.parent.mkdir(exist_ok=True)
-    SECRETS_FILE.write_text("\n".join(lines), encoding="utf-8")
+    # Sólo el dueño puede leerlo: contiene el secreto de la cookie y el del cliente de Keycloak.
+    fd = os.open(SECRETS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    SECRETS_FILE.chmod(0o600)  # por si el archivo ya existía con otros permisos
     print(f"Configuración de st.login escrita en {SECRETS_FILE.relative_to(ROOT_DIR)}")
 
 

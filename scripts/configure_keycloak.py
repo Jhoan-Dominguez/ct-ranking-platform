@@ -9,12 +9,8 @@ cuenta de la consola (KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD del realm master)
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import get_settings
 
@@ -144,6 +140,12 @@ def configure_password_check(api: str, headers: dict, settings) -> None:
         "serviceAccountsEnabled": False,
         "authenticationFlowBindingOverrides": {"direct_grant": flow["id"]},
         "attributes": {"access.token.lifespan": "60", "use.refresh.tokens": "false"},
+        # Como este flujo no pide el código 2FA, su token no debe servir para nada más: sin roles
+        # (fullScopeAllowed=false) ni scopes por defecto, la API de cuenta de Keycloak y cualquier
+        # otro servicio lo rechazan. La app sólo lee de él el identificador del usuario (sub).
+        "fullScopeAllowed": False,
+        "defaultClientScopes": ["basic"],
+        "optionalClientScopes": [],
     }
     found = requests.get(
         f"{api}/clients",
@@ -152,16 +154,30 @@ def configure_password_check(api: str, headers: dict, settings) -> None:
         timeout=TIMEOUT,
     ).json()
     if found:
+        client_uuid = found[0]["id"]
         requests.put(
-            f"{api}/clients/{found[0]['id']}",
+            f"{api}/clients/{client_uuid}",
             headers=headers,
             json={**found[0], **client},
             timeout=TIMEOUT,
         ).raise_for_status()
     else:
-        requests.post(
-            f"{api}/clients", headers=headers, json=client, timeout=TIMEOUT
-        ).raise_for_status()
+        resp = requests.post(f"{api}/clients", headers=headers, json=client, timeout=TIMEOUT)
+        resp.raise_for_status()
+        client_uuid = resp.headers["Location"].rstrip("/").rsplit("/", 1)[-1]
+    _restrict_scopes(api, headers, client_uuid, keep={"basic"})
+
+
+def _restrict_scopes(api: str, headers: dict, client_uuid: str, keep: set[str]) -> None:
+    """Quita del cliente los client scopes por defecto y opcionales que no estén en ``keep``
+    (el PUT del cliente no los modifica en clientes ya existentes)."""
+    for kind in ("default-client-scopes", "optional-client-scopes"):
+        url = f"{api}/clients/{client_uuid}/{kind}"
+        for scope in requests.get(url, headers=headers, timeout=TIMEOUT).json():
+            if scope["name"] not in keep:
+                requests.delete(
+                    f"{url}/{scope['id']}", headers=headers, timeout=TIMEOUT
+                ).raise_for_status()
 
 
 def configure_google(api: str, headers: dict, settings) -> str:

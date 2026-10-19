@@ -30,9 +30,9 @@ install: ## Instala dependencias en el entorno virtual
 
 up: env ## Levanta PostgreSQL, Keycloak y Mailpit; configura Keycloak e inicializa la BD
 	$(COMPOSE) up -d
-	$(PYTHON) scripts/wait_for_services.py
-	$(PYTHON) scripts/configure_keycloak.py
-	$(PYTHON) scripts/write_streamlit_secrets.py
+	$(PYTHON) -m scripts.wait_for_services
+	$(PYTHON) -m scripts.configure_keycloak
+	$(PYTHON) -m scripts.write_streamlit_secrets
 	$(PYTHON) -m app.database.init_db
 
 down: ## Detiene y elimina los contenedores (conserva los datos)
@@ -47,7 +47,7 @@ ps: ## Estado de los contenedores
 	$(COMPOSE) ps
 
 run: ## Ejecuta la aplicación Streamlit
-	@$(PYTHON) scripts/write_streamlit_secrets.py
+	@$(PYTHON) -m scripts.write_streamlit_secrets
 	$(VENV)/bin/streamlit run app/main.py --server.port $(APP_PORT)
 
 dev: up run ## Levanta los servicios y ejecuta la aplicación
@@ -67,7 +67,7 @@ purge-accounts: ## Elimina definitivamente las cuentas cuyo plazo de eliminació
 	$(PYTHON) -m app.jobs.purge_accounts
 
 migrate-emails: ## Pasa el correo de los estudiantes al dominio institucional (ARGS=--dry-run)
-	$(PYTHON) scripts/migrate_student_emails.py $(ARGS)
+	$(PYTHON) -m scripts.migrate_student_emails $(ARGS)
 
 # ---------------------------------------------------------------- calidad
 
