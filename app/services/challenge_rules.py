@@ -24,6 +24,7 @@ from app.database.models import (
     SupportMessage,
     User,
 )
+from app.services import academics
 
 
 @dataclass(frozen=True)
@@ -39,9 +40,7 @@ def _count(session: Session, stmt) -> float:
 
 
 def _general_average(session: Session, user_id: int) -> float:
-    from app.services.academics import general_average, list_subjects
-
-    return general_average(list_subjects(session, user_id)) or 0.0
+    return academics.general_average(academics.list_subjects(session, user_id)) or 0.0
 
 
 def _rules() -> dict[str, Rule]:
@@ -135,15 +134,18 @@ def _profile_fields(session: Session, user_id: int) -> float:
     user = session.get(User, user_id)
     if user is None:
         return 0
-    return float(sum(bool(v) for v in (user.alias, user.avatar, user.program, user.bio)))
+    return float(sum(bool(v) for v in (user.alias, user.has_avatar, user.program, user.bio)))
 
 
 RULES: dict[str, Rule] = _rules()
 
 
 def progress(session: Session, rule_code: str, user_id: int) -> tuple[float, float]:
-    """(valor actual, meta)."""
-    rule = RULES[rule_code]
+    """(valor actual, meta). Una regla desconocida (p. ej. renombrada en el código pero aún
+    guardada en la BD) se muestra como no cumplida en lugar de romper la página."""
+    rule = RULES.get(rule_code)
+    if rule is None:
+        return 0.0, 1.0
     return rule.measure(session, user_id), rule.target
 
 

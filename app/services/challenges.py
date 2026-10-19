@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import math
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from sqlalchemy import or_, select, true
+from sqlalchemy import Select, case, func, or_, select, true
 from sqlalchemy.orm import Session, selectinload
 
 from app.database.models import (
@@ -21,7 +19,9 @@ from app.database.models import (
 )
 from app.services import challenge_rules
 
-FIRST_FINISHER_BONUS = 0.5  # +50% de los puntos para quien completa primero
+# +50% de los puntos (redondeado hacia arriba) para quien completa primero. Se calcula en SQL
+# con aritmética entera: ceil(p * NUM / DEN) = (p * NUM + DEN - 1) // DEN.
+FIRST_FINISHER_BONUS = (1, 2)
 SCOPES = {
     "Todos": "all",
     "Globales": "global",
@@ -176,10 +176,24 @@ def list_challenges(
     only_open: bool = False,
     hidden_creator_ids: set[int] | None = None,
 ) -> list[ChallengeRow]:
+    # Conteos en SQL en lugar de cargar todas las participaciones de cada reto.
+    n_participants = (
+        select(func.count(ChallengeParticipant.id))
+        .where(ChallengeParticipant.challenge_id == Challenge.id)
+        .scalar_subquery()
+    )
+    n_completed = (
+        select(func.count(ChallengeParticipant.id))
+        .where(
+            ChallengeParticipant.challenge_id == Challenge.id,
+            ChallengeParticipant.completed_at.is_not(None),
+        )
+        .scalar_subquery()
+    )
     stmt = (
-        select(Challenge)
+        select(Challenge, n_participants, n_completed)
         .where(_visibility_filter(user))
-        .options(selectinload(Challenge.participants), selectinload(Challenge.creator))
+        .options(selectinload(Challenge.creator))
         .order_by(Challenge.kind, Challenge.created_at.desc())
     )
     if scope == "global":
@@ -200,20 +214,29 @@ def list_challenges(
             ChallengeParticipant.user_id == user.id
         )
         stmt = stmt.where(Challenge.id.in_(joined))
+    mine = {
+        p.challenge_id: p
+        for p in session.scalars(
+            select(ChallengeParticipant).where(ChallengeParticipant.user_id == user.id)
+        )
+    }
     rows = []
-    for ch in session.scalars(stmt):
+    for ch, participants, completed in session.execute(stmt):
         if only_open and not _is_open(ch):
             continue
-        mine = next((p for p in ch.participants if p.user_id == user.id), None)
         rows.append(
             ChallengeRow(
                 challenge=ch,
-                participants=len(ch.participants),
-                completed=sum(1 for p in ch.participants if p.completed_at),
-                my_participation=mine,
+                participants=participants,
+                completed=completed,
+                my_participation=mine.get(ch.id),
             )
         )
     return rows
+
+
+def get_challenge(session: Session, challenge_id: int) -> Challenge | None:
+    return session.get(Challenge, challenge_id)
 
 
 def _participation(session: Session, user_id: int, challenge_id: int) -> ChallengeParticipant:
@@ -316,14 +339,53 @@ def ranking(session: Session, challenge_id: int) -> list[RankingEntry]:
     return entries
 
 
-def stats(session: Session, challenge_id: int) -> ChallengeStats:
-    entries = ranking(session, challenge_id)
+def stats(
+    session: Session, challenge_id: int, entries: list[RankingEntry] | None = None
+) -> ChallengeStats:
+    """Métricas del reto. Acepta el resultado de ``ranking`` para no repetir la consulta."""
+    entries = ranking(session, challenge_id) if entries is None else entries
     completed = [e for e in entries if e.completed_at]
     return ChallengeStats(
         participants=len(entries),
         completed=len(completed),
         first=completed[0] if completed else None,
     )
+
+
+def _scores_query() -> Select:
+    """Puntaje por usuario calculado en SQL: suma de puntos de retos completados más el bono de
+    quien terminó primero cada reto (``ROW_NUMBER`` por reto ordenado por fecha).
+
+    Las cuentas con eliminación programada no cuentan, ni siquiera para decidir quién fue
+    primero: así su salida no le quita el bono al primer usuario activo."""
+    num, den = FIRST_FINISHER_BONUS
+    ranked = (
+        select(
+            ChallengeParticipant.user_id,
+            Challenge.points,
+            func.row_number()
+            .over(
+                partition_by=ChallengeParticipant.challenge_id,
+                order_by=(ChallengeParticipant.completed_at, ChallengeParticipant.id),
+            )
+            .label("place"),
+        )
+        .join(Challenge, Challenge.id == ChallengeParticipant.challenge_id)
+        .join(User, User.id == ChallengeParticipant.user_id)
+        .where(
+            ChallengeParticipant.completed_at.is_not(None),
+            User.deletion_scheduled_for.is_(None),
+        )
+        .subquery()
+    )
+    is_first = ranked.c.place == 1
+    bonus = case((is_first, (ranked.c.points * num + den - 1) // den), else_=0)
+    return select(
+        ranked.c.user_id,
+        (func.sum(ranked.c.points) + func.sum(bonus)).label("score"),
+        func.count().label("completed"),
+        func.sum(case((is_first, 1), else_=0)).label("firsts"),
+    ).group_by(ranked.c.user_id)
 
 
 def leaderboard(
@@ -333,39 +395,57 @@ def leaderboard(
     user_ids: set[int] | None = None,
     exclude_ids: set[int] | None = None,
 ) -> list[LeaderboardEntry]:
-    """Puntos totales: suma de puntos de retos completados + bonus por llegar primero."""
-    rows = session.execute(
-        select(ChallengeParticipant, Challenge)
-        .join(Challenge)
-        .where(ChallengeParticipant.completed_at.is_not(None))
-        .options(selectinload(ChallengeParticipant.user))
-    ).all()
-    first_by_challenge: dict[int, ChallengeParticipant] = {}
-    for part, _ in rows:
-        current = first_by_challenge.get(part.challenge_id)
-        if current is None or part.completed_at < current.completed_at:  # type: ignore[operator]
-            first_by_challenge[part.challenge_id] = part
+    """Puntos totales: suma de puntos de retos completados + bonus por llegar primero.
 
-    score: dict[int, int] = defaultdict(int)
-    completed: dict[int, int] = defaultdict(int)
-    firsts: dict[int, int] = defaultdict(int)
-    users: dict[int, User] = {}
-    for part, ch in rows:
-        if user_ids is not None and part.user_id not in user_ids:
-            continue
-        if exclude_ids and part.user_id in exclude_ids:
-            continue
-        users[part.user_id] = part.user
-        score[part.user_id] += ch.points
-        completed[part.user_id] += 1
-        if first_by_challenge[ch.id] is part:
-            score[part.user_id] += math.ceil(ch.points * FIRST_FINISHER_BONUS)
-            firsts[part.user_id] += 1
-    ordered = sorted(users, key=lambda uid: (-score[uid], -firsts[uid], users[uid].username))
+    ``user_ids`` y ``exclude_ids`` sólo filtran a quién se muestra: el primero de cada reto se
+    decide entre todas las cuentas activas."""
+    scores = _scores_query().subquery()
+    stmt = (
+        select(User, scores.c.score, scores.c.completed, scores.c.firsts)
+        .join(scores, scores.c.user_id == User.id)
+        .order_by(scores.c.score.desc(), scores.c.firsts.desc(), User.username)
+        .limit(limit)
+    )
+    if user_ids is not None:
+        stmt = stmt.where(User.id.in_(user_ids))
+    if exclude_ids:
+        stmt = stmt.where(User.id.not_in(exclude_ids))
     return [
-        LeaderboardEntry(users[uid], score[uid], completed[uid], firsts[uid])
-        for uid in ordered[:limit]
+        LeaderboardEntry(user, int(score), int(completed), int(firsts))
+        for user, score, completed, firsts in session.execute(stmt)
     ]
+
+
+def scores_by_user(session: Session) -> dict[int, int]:
+    """Puntaje de cada usuario con retos completados (para tablas como la del panel)."""
+    scores = _scores_query().subquery()
+    rows = session.execute(select(scores.c.user_id, scores.c.score))
+    return {user_id: int(score) for user_id, score in rows}
+
+
+@dataclass
+class Standing:
+    score: int
+    completed: int
+    position: int | None
+
+
+def standing(session: Session, user_id: int) -> Standing:
+    """Puntaje y posición de un usuario en el ranking general, sin cargar todo el ranking."""
+    scores = _scores_query().subquery()
+    ranked = select(
+        scores.c.user_id,
+        scores.c.score,
+        scores.c.completed,
+        func.row_number()
+        .over(order_by=(scores.c.score.desc(), scores.c.firsts.desc(), User.username))
+        .label("position"),
+    ).join(User, User.id == scores.c.user_id)
+    positions = ranked.subquery()
+    row = session.execute(select(positions).where(positions.c.user_id == user_id)).first()
+    if row is None:
+        return Standing(0, 0, None)
+    return Standing(int(row.score), int(row.completed), int(row.position))
 
 
 def set_active(session: Session, actor: User, challenge_id: int, active: bool) -> None:

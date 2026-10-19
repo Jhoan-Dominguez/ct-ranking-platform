@@ -61,8 +61,14 @@ def list_posts(
     order: str = "recent",
     limit: int = 100,
 ) -> list[PostRow]:
-    n_comments = select(func.count(Comment.id)).where(Comment.post_id == Post.id).scalar_subquery()
-    n_likes = select(func.count()).where(PostLike.post_id == Post.id).scalar_subquery()
+    # Los conteos tampoco incluyen comentarios ni "me gusta" de usuarios ocultos para quien mira.
+    comments_q = select(func.count(Comment.id)).where(Comment.post_id == Post.id)
+    likes_q = select(func.count()).where(PostLike.post_id == Post.id)
+    if exclude_author_ids:
+        comments_q = comments_q.where(Comment.author_id.not_in(exclude_author_ids))
+        likes_q = likes_q.where(PostLike.user_id.not_in(exclude_author_ids))
+    n_comments = comments_q.scalar_subquery()
+    n_likes = likes_q.scalar_subquery()
     stmt = select(Post, n_comments.label("c"), n_likes.label("l")).options(
         selectinload(Post.author)
     )

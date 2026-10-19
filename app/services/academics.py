@@ -264,7 +264,13 @@ def load_pensum(session: Session, user: User, program: str) -> int:
     pensum = PENSUMS.get(program)
     if pensum is None:
         raise AcademicError("Programa no disponible en el catálogo.")
-    existing = {_subject_key(s) for s in list_subjects(session, user.id)}
+    # Una materia ya registrada coincide por código **o** por nombre (el estudiante pudo usar
+    # otro código, p. ej. el de una homologación).
+    existing = set()
+    for s in list_subjects(session, user.id):
+        existing.add(s.name.strip().lower())
+        if s.code.strip():
+            existing.add(s.code.strip().lower())
     added = 0
     for ps in pensum.subjects:
         if ps.code.lower() in existing or ps.name.lower() in existing:

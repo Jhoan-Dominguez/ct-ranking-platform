@@ -19,6 +19,7 @@ from app.database.models import (
     GradeItem,
     Post,
     ReportStatus,
+    Role,
     Subject,
     SupportMessage,
     User,
@@ -46,31 +47,48 @@ class GlobalMetrics:
     unverified_users: int
 
 
+class AdminError(ValueError):
+    pass
+
+
+def _require_admin(actor: User) -> None:
+    # La página ya lo verifica; se repite aquí para que el servicio sea seguro por sí mismo.
+    if not actor.is_admin:
+        raise AdminError("Sólo un administrador puede hacer esto.")
+
+
 def _count(session: Session, model, *where) -> int:
     return session.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
 
+def _count_q(model, *where):
+    return select(func.count()).select_from(model).where(*where).scalar_subquery()
+
+
 def global_metrics(session: Session) -> GlobalMetrics:
+    """Todas las métricas en una sola consulta (subconsultas escalares)."""
     now = datetime.now(UTC)
-    return GlobalMetrics(
-        users=_count(session, User),
-        active_users_7d=_count(session, User, User.last_login >= now - timedelta(days=7)),
-        new_users_30d=_count(session, User, User.created_at >= now - timedelta(days=30)),
-        posts=_count(session, Post),
-        comments=_count(session, Comment),
-        challenges_global=_count(session, Challenge, Challenge.kind == ChallengeKind.GLOBAL),
-        challenges_user=_count(session, Challenge, Challenge.kind == ChallengeKind.USER),
-        participations=_count(session, ChallengeParticipant),
-        completions=_count(
-            session, ChallengeParticipant, ChallengeParticipant.completed_at.is_not(None)
+    fields = {
+        "users": _count_q(User),
+        "active_users_7d": _count_q(User, User.last_login >= now - timedelta(days=7)),
+        "new_users_30d": _count_q(User, User.created_at >= now - timedelta(days=30)),
+        "posts": _count_q(Post),
+        "comments": _count_q(Comment),
+        "challenges_global": _count_q(Challenge, Challenge.kind == ChallengeKind.GLOBAL),
+        "challenges_user": _count_q(Challenge, Challenge.kind == ChallengeKind.USER),
+        "participations": _count_q(ChallengeParticipant),
+        "completions": _count_q(
+            ChallengeParticipant, ChallengeParticipant.completed_at.is_not(None)
         ),
-        messages=_count(session, SupportMessage),
-        follows=_count(session, Follow),
-        grade_items=_count(session, GradeItem),
-        pending_reports=_count(session, UserReport, UserReport.status == ReportStatus.PENDING),
-        pending_deletions=_count(session, User, User.deletion_scheduled_for.is_not(None)),
-        unverified_users=_count(session, User, User.email_verified.is_(False)),
-    )
+        "messages": _count_q(SupportMessage),
+        "follows": _count_q(Follow),
+        "grade_items": _count_q(GradeItem),
+        "pending_reports": _count_q(UserReport, UserReport.status == ReportStatus.PENDING),
+        "pending_deletions": _count_q(User, User.deletion_scheduled_for.is_not(None)),
+        "unverified_users": _count_q(User, User.email_verified.is_(False)),
+    }
+    row = session.execute(select(*(q.label(name) for name, q in fields.items()))).one()
+    return GlobalMetrics(**{name: int(value or 0) for name, value in row._mapping.items()})
 
 
 def students_frame(session: Session, user_ids: set[int] | None = None) -> pd.DataFrame:
@@ -96,7 +114,7 @@ def students_frame(session: Session, user_ids: set[int] | None = None) -> pd.Dat
             .group_by(ChallengeParticipant.user_id)
         ).all()
     )
-    scores = {e.user.id: e.score for e in challenges.leaderboard(session, limit=10_000)}
+    scores = challenges.scores_by_user(session)
     passing = get_settings().grade_passing
 
     records = []
@@ -140,23 +158,23 @@ def students_frame(session: Session, user_ids: set[int] | None = None) -> pd.Dat
 
 
 def activity_frame(session: Session, days: int = 30) -> pd.DataFrame:
-    """Actividad diaria (publicaciones, comentarios, retos completados, mensajes)."""
+    """Actividad diaria (publicaciones, comentarios, retos completados, mensajes), agrupada por
+    día en SQL."""
     since = datetime.now(UTC) - timedelta(days=days)
     series = {
-        "publicaciones": select(Post.created_at).where(Post.created_at >= since),
-        "comentarios": select(Comment.created_at).where(Comment.created_at >= since),
-        "retos completados": select(ChallengeParticipant.completed_at).where(
-            ChallengeParticipant.completed_at >= since
-        ),
-        "mensajes de apoyo": select(SupportMessage.created_at).where(
-            SupportMessage.created_at >= since
-        ),
+        "publicaciones": Post.created_at,
+        "comentarios": Comment.created_at,
+        "retos completados": ChallengeParticipant.completed_at,
+        "mensajes de apoyo": SupportMessage.created_at,
     }
     index = pd.date_range(end=pd.Timestamp.now().normalize(), periods=days, freq="D").date
     frame = pd.DataFrame(index=index)
-    for name, stmt in series.items():
-        days_list = [ts.date() for ts in session.scalars(stmt)]
-        frame[name] = pd.Series(days_list, dtype="object").value_counts()
+    for name, column in series.items():
+        day = func.date(column)
+        rows = session.execute(select(day, func.count()).where(column >= since).group_by(day))
+        # SQLite devuelve la fecha como texto y PostgreSQL como date.
+        counts = {pd.Timestamp(d).date(): n for d, n in rows}
+        frame[name] = pd.Series(counts, dtype="float64")
     return frame.fillna(0).astype(int)
 
 
@@ -230,10 +248,18 @@ def challenges_frame(session: Session) -> pd.DataFrame:
     return pd.DataFrame.from_records(rows)
 
 
-def set_role(session: Session, user_id: int, role: str) -> None:
+def set_role(session: Session, actor: User, user_id: int, role: str) -> None:
+    """Cambia el rol en la app, que es la fuente de verdad (el rol de Keycloak sólo se usa al
+    crear la cuenta local)."""
+    _require_admin(actor)
+    if role not in {r.value for r in Role}:
+        raise AdminError("Rol inválido.")
+    if user_id == actor.id:
+        raise AdminError("No puedes cambiar tu propio rol.")
     user = session.get(User, user_id)
-    if user is not None:
-        user.role = role
+    if user is None:
+        raise AdminError("Usuario no encontrado.")
+    user.role = role
 
 
 def posts_frame(session: Session) -> pd.DataFrame:
@@ -289,7 +315,8 @@ def messages_frame(session: Session) -> pd.DataFrame:
     )
 
 
-def delete_message(session: Session, message_id: int) -> None:
+def delete_message(session: Session, actor: User, message_id: int) -> None:
+    _require_admin(actor)
     message = session.get(SupportMessage, message_id)
     if message is not None:
         session.delete(message)

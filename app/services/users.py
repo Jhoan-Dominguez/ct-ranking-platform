@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import io
-from datetime import date
+from datetime import UTC, date, datetime
+from urllib.parse import urlparse
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, or_, select
@@ -29,27 +30,56 @@ PROFILE_FIELDS = {
 }
 
 
+URL_FIELDS = ("github_url", "linkedin_url")
+
+
 class ProfileError(ValueError):
     pass
+
+
+def _validate_url(value: str) -> str:
+    """Sólo enlaces http(s) con dominio: evita ``javascript:`` y la inyección de Markdown."""
+    if not value:
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ProfileError("Los enlaces deben empezar por https:// (o http://).")
+    if any(c in value for c in " <>()[]\"'`"):
+        raise ProfileError("El enlace contiene caracteres no válidos.")
+    return value
 
 
 def get_user(session: Session, user_id: int) -> User | None:
     return session.get(User, user_id)
 
 
+def list_users(session: Session) -> list[User]:
+    return list(session.scalars(select(User).order_by(User.username)))
+
+
+def avatar_bytes(session: Session, user_id: int) -> bytes | None:
+    """La foto (columna diferida) de un usuario, sin cargar el resto de la fila."""
+    return session.scalar(select(User.avatar).where(User.id == user_id))
+
+
 def update_profile(session: Session, user: User, **fields) -> User:
+    # El alias se valida antes de asignarlo: con autoflush, asignarlo primero haría que el SELECT
+    # de comprobación chocara con el índice único en lugar de dar un mensaje claro.
+    alias = (fields.get("alias") or "").strip()
+    if alias and alias.lower() != (user.alias or "").lower():
+        taken = session.scalar(
+            select(User.id).where(func.lower(User.alias) == alias.lower(), User.id != user.id)
+        )
+        if taken:
+            raise ProfileError("Ese alias ya lo usa otra persona.")
     for key, max_len in PROFILE_FIELDS.items():
         if key in fields:
             value = (fields[key] or "").strip()
             if len(value) > max_len:
                 raise ProfileError(f"El campo '{key}' supera {max_len} caracteres.")
+            if key in URL_FIELDS:
+                value = _validate_url(value)
             setattr(user, key, value)
-    if "alias" in fields and user.alias:
-        taken = session.scalar(
-            select(User.id).where(func.lower(User.alias) == user.alias.lower(), User.id != user.id)
-        )
-        if taken:
-            raise ProfileError("Ese alias ya lo usa otra persona.")
     if "birth_date" in fields:
         birth: date | None = fields["birth_date"]
         if birth and birth > date.today():
@@ -85,8 +115,10 @@ def process_avatar(raw: bytes) -> bytes:
 def set_avatar(user: User, raw: bytes | None) -> None:
     if raw is None:
         user.avatar, user.avatar_mime = None, None
-        return
-    user.avatar, user.avatar_mime = process_avatar(raw), "image/png"
+    else:
+        user.avatar, user.avatar_mime = process_avatar(raw), "image/png"
+    # Cambia la clave de la caché de la foto en la UI.
+    user.avatar_updated_at = datetime.now(UTC)
 
 
 def search_users(

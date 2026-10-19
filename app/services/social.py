@@ -69,15 +69,17 @@ def following(session: Session, user_id: int) -> list[User]:
     return list(session.scalars(stmt))
 
 
-def follow_counts(session: Session, user_id: int) -> tuple[int, int]:
-    """(seguidores, seguidos)."""
-    n_followers = session.scalar(
-        select(func.count()).select_from(Follow).where(Follow.followed_id == user_id)
-    )
-    n_following = session.scalar(
-        select(func.count()).select_from(Follow).where(Follow.follower_id == user_id)
-    )
-    return n_followers or 0, n_following or 0
+def follow_counts(
+    session: Session, user_id: int, hidden_ids: set[int] | None = None
+) -> tuple[int, int]:
+    """(seguidores, seguidos). ``hidden_ids`` excluye cuentas ocultas para quien mira
+    (bloqueos y eliminación programada), igual que las listas de Personas."""
+    followers_q = select(func.count()).select_from(Follow).where(Follow.followed_id == user_id)
+    following_q = select(func.count()).select_from(Follow).where(Follow.follower_id == user_id)
+    if hidden_ids:
+        followers_q = followers_q.where(Follow.follower_id.not_in(hidden_ids))
+        following_q = following_q.where(Follow.followed_id.not_in(hidden_ids))
+    return session.scalar(followers_q) or 0, session.scalar(following_q) or 0
 
 
 def send_support(session: Session, sender_id: int, recipient_id: int, message: str) -> None:

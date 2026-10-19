@@ -101,9 +101,8 @@ def blocked_users(session: Session, user_id: int) -> list[User]:
 
 def hidden_user_ids(session: Session, viewer_id: int) -> set[int]:
     """Usuarios cuyo contenido no debe ver ``viewer_id``: bloqueos y cuentas en eliminación."""
-    from app.auth.accounts import pending_deletion_ids
-
-    return (blocked_ids(session, viewer_id) | pending_deletion_ids(session)) - {viewer_id}
+    pending = set(session.scalars(select(User.id).where(User.deletion_scheduled_for.is_not(None))))
+    return (blocked_ids(session, viewer_id) | pending) - {viewer_id}
 
 
 # --------------------------------------------------------------------------- reportes
@@ -130,6 +129,8 @@ def report(
         raise ModerationError("La descripción es demasiado larga (máx. 2000 caracteres).")
     if session.get(User, reported_id) is None:
         raise ModerationError("Usuario no encontrado.")
+    if post_id is not None and comment_id is not None:
+        raise ModerationError("Reporta la publicación o el comentario, no ambos.")
     if post_id is not None and session.get(Post, post_id) is None:
         raise ModerationError("La publicación ya no existe.")
     if comment_id is not None and session.get(Comment, comment_id) is None:
@@ -182,6 +183,14 @@ def pending_reports_count(session: Session) -> int:
         )
         or 0
     )
+
+
+def reports_against_counts(session: Session) -> dict[int, int]:
+    """Reportes recibidos por cada usuario, en una sola consulta (para la tabla del panel)."""
+    rows = session.execute(
+        select(UserReport.reported_id, func.count()).group_by(UserReport.reported_id)
+    )
+    return dict(rows.all())  # type: ignore[arg-type]
 
 
 def reports_against_count(session: Session, user_id: int) -> int:
