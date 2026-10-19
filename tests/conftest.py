@@ -9,11 +9,17 @@ from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 
 from app import auth
+from app.core import ratelimit
 from app.core.config import get_settings
 from app.database import session as db_session
 from app.database.models import Base
 
 get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    ratelimit.reset()
 
 
 @pytest.fixture

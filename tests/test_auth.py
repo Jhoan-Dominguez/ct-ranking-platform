@@ -1,9 +1,17 @@
 """Autenticación: registro, login, contraseñas, dominio institucional y Google."""
 
+import re
+
 import pytest
 
 from app import auth
+from app.auth import accounts
 from app.auth import service as auth_service
+from app.core import mailer
+
+
+def _last_code() -> str:
+    return re.search(r"\b(\d{6})\b", mailer.OUTBOX[-1].text).group(1)
 
 
 def test_register_and_login_local(session, make_user):
@@ -46,8 +54,9 @@ def test_students_must_use_institutional_domain(session, make_user):
         make_user(email="laura@areandina.edu.co")  # otro subdominio
     student = make_user(email="sofi@estudiantes.areandina.edu.co")
     with pytest.raises(auth.AuthError, match="institucional"):
-        auth.change_email(session, student, "sofi@gmail.com")
-    auth.change_email(session, student, "sofia.h@estudiantes.areandina.edu.co")
+        accounts.request_email_change(session, student, "sofi@gmail.com")
+    accounts.request_email_change(session, student, "sofia.h@estudiantes.areandina.edu.co")
+    accounts.confirm_email_change(session, student, _last_code())
     assert student.email == "sofia.h@estudiantes.areandina.edu.co"
 
 
@@ -55,7 +64,8 @@ def test_admins_are_exempt_from_student_domain(session, make_user):
     from app.database.models import Role
 
     admin = make_user(email="soporte@ctranking.local", role=Role.ADMIN)
-    auth.change_email(session, admin, "admin2@ctranking.local")
+    accounts.request_email_change(session, admin, "admin2@ctranking.local")
+    accounts.confirm_email_change(session, admin, _last_code())
     assert admin.email == "admin2@ctranking.local"
 
 

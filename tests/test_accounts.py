@@ -44,7 +44,8 @@ def test_deletion_requires_password_and_email_code(session, make_user):
         accounts.request_deletion(session, user, "Clave1234")
 
 
-def test_deletion_code_is_single_use_and_limited(session, make_user):
+def test_deletion_code_is_single_use_and_limited(session, make_user, monkeypatch):
+    monkeypatch.setattr(accounts, "RESEND_COOLDOWN", timedelta(0))
     user = make_user(password="Clave1234")
     accounts.request_deletion(session, user, "Clave1234")
     first = _last_code()
@@ -59,6 +60,14 @@ def test_deletion_code_is_single_use_and_limited(session, make_user):
             accounts.confirm_deletion(session, user, wrong)
     with pytest.raises(accounts.AccountError, match="Demasiados intentos"):
         accounts.confirm_deletion(session, user, second)
+
+
+def test_codes_cannot_be_requested_back_to_back(session, make_user):
+    user = make_user(password="Clave1234")
+    accounts.request_deletion(session, user, "Clave1234")
+    with pytest.raises(accounts.AccountError, match="Espera un minuto"):
+        accounts.request_deletion(session, user, "Clave1234")
+    assert len(mailer.OUTBOX) == 1
 
 
 def test_expired_code_is_rejected(session, make_user):
