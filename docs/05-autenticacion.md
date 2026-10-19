@@ -36,7 +36,7 @@ Todas lanzan `AuthError` con un mensaje en español apto para mostrar al usuario
 
 ### Configuración del realm
 
-Keycloak importa el archivo `docker/keycloak/ct-ranking-realm.json` en el primer arranque:
+Keycloak importa el archivo `container/keycloak/ct-ranking-realm.json` en el primer arranque:
 
 | Elemento | Configuración |
 |----------|---------------|

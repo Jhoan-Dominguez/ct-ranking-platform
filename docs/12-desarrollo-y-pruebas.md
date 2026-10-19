@@ -3,10 +3,10 @@
 ## Flujo de trabajo
 
 ```bash
-make create          # una sola vez
-make up              # servicios
-make run             # la app; Streamlit recarga al guardar archivos ("Rerun" o "Always rerun")
-make test            # pruebas rápidas, sin Docker
+make create          # una sola vez: .venv con las herramientas de calidad y el hook de pre-commit
+make dev             # servicios + app en contenedores, con el código montado: recarga al guardar
+make run             # sin make dev: reconstruye la imagen y reinicia la app tras cambiar código
+make test            # pruebas rápidas en .venv, sin contenedores
 make lint            # antes de hacer commit (el hook también lo hace automáticamente)
 ```
 
@@ -101,7 +101,7 @@ virtual aparte para no agregarlo a las dependencias del proyecto:
 
 ```bash
 python3 -m venv /tmp/selenv && /tmp/selenv/bin/pip install selenium
-make run   # en otra terminal
+make up    # la app queda en http://localhost:8501
 ```
 
 ```python

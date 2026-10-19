@@ -11,20 +11,21 @@ CT Ranking is a Streamlit platform for university students. It covers forums, th
 
 ## Commands
 
-Always use the existing `.venv` (Python 3.13).
+The app and its services run in containers (`container/`), with Docker or Podman. The local `.venv` (Python 3.13) is only for tests, lint and format.
 
 ```bash
-make create       # .env from .env.example, install requirements-dev.txt, pre-commit install
-make up           # docker compose (PostgreSQL 16 + Keycloak 26 + Mailpit), wait, configure Keycloak (SMTP, app URLs), create tables + base data
-make run          # streamlit run app/main.py (port APP_PORT, default 8501); also regenerates .streamlit/secrets.toml
-make dev          # make up + make run
-make init-db      # create tables + base data only (what make up does last)
+make up           # build app image, start db/keycloak/mailpit, run `setup` (wait, configure Keycloak, init_db), start app on :8501
+make dev          # like up, but mounts app/ and scripts/ read-only and reloads on save (container/compose.dev.yaml)
+make run          # rebuild the image and restart only the app container
+make shell        # bash in a fresh app container; make logs / make ps
+make init-db      # create tables + base data only (what setup does last)
 make seed-demo    # demo users (password Demo1234) and content; idempotent
 make reset-db     # drop and recreate app tables (Keycloak users are NOT removed)
 make purge-accounts  # delete accounts whose 7-day deletion grace period expired (app + Keycloak)
 make migrate-emails  # move existing students' emails to STUDENT_EMAIL_DOMAIN (ARGS=--dry-run to preview)
 make down / make destroy   # stop containers / stop and delete volumes
-make test         # pytest; SQLite in memory + AUTH_PROVIDER=local + MAIL_BACKEND=memory, no Docker needed
+make create       # .env from .env.example, .venv with requirements-dev.txt, pre-commit install
+make test         # pytest in .venv; SQLite in memory + AUTH_PROVIDER=local + MAIL_BACKEND=memory, no containers needed
 make lint         # pre-commit run --all-files (isort + ruff check --fix + ruff format + hygiene hooks)
 make format       # isort + ruff check --fix + ruff format on app, tests, scripts
 ```
@@ -33,7 +34,14 @@ make format       # isort + ruff check --fix + ruff format on app, tests, script
 - Tests use the `session` fixture (fresh in-memory SQLite with foreign keys on) and `make_user(**kwargs)` (registers through `auth.register`) from `tests/conftest.py`. Sent emails land in `mailer.OUTBOX`.
 - To run a single test: `.venv/bin/python -m pytest tests/test_challenges.py::test_ranking_orders_by_completion_and_first_bonus`.
 - `pre-commit run --all-files` only checks git-tracked files. For untracked files, use `pre-commit run --files <paths>`.
-- Ports: Keycloak is exposed on **8180** (8080 is taken on this machine), Postgres on 5432, and Mailpit on 1025 (SMTP) and 8025 (web UI, where all dev emails land). All are published on `127.0.0.1` only (`BIND_ADDRESS`) and can be changed in `.env`.
+- Ports: Keycloak is exposed on **8180** (8080 is taken on this machine), Postgres on 5432, the app on 8501, and Mailpit on 1025 (SMTP) and 8025 (web UI, where all dev emails land). All are published on `127.0.0.1` only (`BIND_ADDRESS`) and can be changed in `.env`.
+- **Containers** (`container/`, details in `docs/03-despliegue-y-operacion.md`):
+  - `ENGINE` defaults to docker if installed, else podman (`make up ENGINE=podman`). `COMPOSE` is `$(ENGINE) compose --env-file .env -f container/compose.yaml`; `--env-file` is needed because compose otherwise looks for `.env` next to the compose file.
+  - The app image (`container/Dockerfile`, `python:3.13-slim`, user `app` uid 10001) bakes in the code; `.env` comes in via `env_file` and is excluded by the root `.dockerignore`. Code changes need `make run` unless using `make dev`.
+  - Compose overrides `POSTGRES_HOST=db`, `POSTGRES_PORT=5432`, `KEYCLOAK_URL=http://keycloak:8080` and empties `DATABASE_URL` for the app; `.env` values with `localhost` only apply on the host. `SMTP_HOST` is *not* overridden and must be `mailpit` (Makefile warns on `localhost`).
+  - The browser still reaches Keycloak at `KEYCLOAK_PUBLIC_URL` (`KC_HOSTNAME`, issuer of tokens). `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true` lets the app use the internal URL; this keeps `st.login` working when the metadata URL is internal.
+  - `secrets.toml` is written at container start to `STREAMLIT_SECRETS_FILE=/home/app/.streamlit/secrets.toml` (named volume `streamlit`; Streamlit reads `~/.streamlit/secrets.toml` too).
+  - Podman compatibility rules: fully qualified image names, `z` on bind mounts (SELinux), never write to host bind mounts (rootless UID mapping), healthchecks in compose rather than the Dockerfile.
 
 ## Architecture
 
@@ -72,7 +80,7 @@ Package map:
 - **Navigation:** `app/main.py` builds `st.navigation` from callables (`ui.pages.<x>.render`). Unauthenticated users only get the login page. Accounts pending deletion only get `ui/pages/account_pending.py`. The admin page is added only for `role == "admin"`. Detail sub-views use `st.session_state` keys (`post_id`, `profile_id`, `challenge_id`).
 - **Auth** (`app/auth/service.py`) is switched by `AUTH_PROVIDER`:
   - **`keycloak`**: login uses ROPC (`grant_type=password`) on the confidential client `ct-ranking-app`. Registration and password/email/name/enable changes go through the Keycloak Admin API using that client's service account (`manage-users`).
-    - The realm is imported from `docker/keycloak/ct-ranking-realm.json`, which uses `${ENV}` placeholders filled from docker-compose env.
+    - The realm is imported from `container/keycloak/ct-ranking-realm.json`, which uses `${ENV}` placeholders filled from the compose env.
     - Keycloak 26's user profile requires firstName and lastName, or the password grant fails with "Account is not fully set up". This is why `User` has `first_name`/`last_name` and registration requires both.
     - `update_user` does GET then a full PUT on purpose.
     - `KeycloakClient` shares a `requests.Session` and caches the service-account token until shortly before it expires.
@@ -120,7 +128,7 @@ Package map:
   - `ct-ranking-pwcheck` tokens skip OTP, so `configure_keycloak.py` gives that client `fullScopeAllowed: false` and only the `basic` scope (no roles, no audience). The app only reads `sub` from it.
 - **Google login** (`docs/15-inicio-sesion-con-google.md`):
   - It uses `st.login("google")`, an OIDC Authorization Code flow against Keycloak. `authorize_params = {kc_idp_hint = "google"}` makes Keycloak jump straight to Google.
-  - `.streamlit/secrets.toml` is generated from `.env` by `scripts/write_streamlit_secrets.py` (it is gitignored).
+  - `secrets.toml` is generated from the env by `scripts/write_streamlit_secrets.py` when the app container starts (in the container, `~/.streamlit/secrets.toml`; locally `.streamlit/secrets.toml`, gitignored).
   - `scripts/configure_keycloak.py` creates the Google IdP (`hostedDomain` = institutional domain, username = email local part) only when `GOOGLE_CLIENT_ID` is set, and removes it otherwise.
   - There are two identical `st.login` providers, `google` (sign in) and `googlesignup` (sign up). Streamlit forbids `_` in provider names. Streamlit stores the provider name in `st.user["provider"]`, and that is the only way to know the intent after the redirect.
   - `session.sync_oidc_session()` calls `auth.login_with_oidc(..., allow_create=provider == "googlesignup")`, which re-validates the domain.
@@ -128,7 +136,7 @@ Package map:
   - The cookie keeps Google sessions across reloads.
   - Requires `authlib` and `httpx`.
 - **Schema changes:** there is no Alembic. New tables come from `create_all`. New columns on existing tables must be added to `SCHEMA_UPGRADES` in `app/database/init_db.py` (idempotent, Postgres only); new `CHECK` constraints to `CHECK_UPGRADES`. Indexes declared in the models are created automatically on existing tables (`Index.create(checkfirst=True)`). Type changes or renames need `make reset-db`.
-- **Scripts** in `scripts/` run as modules from the repo root (`python -m scripts.configure_keycloak`); they do not touch `sys.path`. Only `app/main.py` keeps its `sys.path.insert` because `streamlit run` puts `app/` on the path.
+- **Scripts** in `scripts/` run as modules from the repo root, `/app` in the image (`python -m scripts.configure_keycloak`); they do not touch `sys.path`. Only `app/main.py` keeps its `sys.path.insert` because `streamlit run` puts `app/` on the path.
 
 ## Notes
 

@@ -15,7 +15,7 @@
 | Plotly | 7.1 | Gráficas interactivas (promedios, avance de créditos, actividad, histogramas). |
 | Pillow | 12.3 | Recorte y redimensionamiento de las fotos de perfil. |
 | python-dotenv | 1.2 | Carga de `.env`. |
-| Docker Compose | v2 | Orquestación de PostgreSQL, Keycloak y Mailpit. |
+| Docker Compose / Podman | v2 / 4.7+ | Imagen de la app (`python:3.13-slim`) y orquestación de la app, PostgreSQL, Keycloak y Mailpit (`container/`). |
 | Mailpit | 1.31 | SMTP de desarrollo: atrapa los correos y los muestra en una bandeja web. |
 | pytest | 9.1 | Pruebas automáticas. |
 | ruff · isort · pre-commit | 0.17 · 9.0 · 4.7 | Linter y formateador, orden de imports y hooks de Git. |
@@ -124,18 +124,21 @@ ct-ranking-platform/
 │       │   └── sidebar.py          #     Menú lateral que se expande con el mouse
 │       └── assets/
 │           └── sidebar_hover.js    #   JavaScript del menú lateral
-├── docker/
+├── container/                      # Contenedores (Docker y Podman)
+│   ├── Dockerfile                  #   Imagen de la app (python:3.13-slim)
+│   ├── compose.yaml                #   db, keycloak, mailpit, setup y app
+│   ├── compose.dev.yaml            #   make dev: monta el código y recarga al guardar
 │   ├── keycloak/ct-ranking-realm.json   # Realm importado al arrancar
 │   └── postgres/01-create-keycloak-db.sql
-├── scripts/                        # Operación (los usa el Makefile con `python -m scripts.<nombre>`)
+├── scripts/                        # Operación (se ejecutan en la imagen con `python -m scripts.<nombre>`)
 │   ├── wait_for_services.py        #   Espera a PostgreSQL y Keycloak
 │   ├── configure_keycloak.py       #   SMTP, URLs de la app y proveedor Google en el realm
-│   ├── write_streamlit_secrets.py  #   Genera .streamlit/secrets.toml para st.login
+│   ├── write_streamlit_secrets.py  #   Genera secrets.toml para st.login (al arrancar la app)
 │   └── migrate_student_emails.py   #   Pasa correos de estudiantes al dominio institucional
 ├── tests/                          # pytest por dominio (SQLite en memoria)
 ├── docs/                           # Documentación (+ enunciado, resumen y pensum.png)
 ├── .streamlit/config.toml          # Tema y servidor (secrets.toml se genera, no se versiona)
-├── docker-compose.yml  Makefile  pyproject.toml  .pre-commit-config.yaml
+├── Makefile  pyproject.toml  .pre-commit-config.yaml  .dockerignore
 ├── requirements.txt  requirements-dev.txt  .env.example  .gitignore
 └── README.md  CLAUDE.md
 ```

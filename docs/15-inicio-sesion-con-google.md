@@ -137,8 +137,8 @@ si Keycloak había creado un usuario, se borra.
 6. Aplica la configuración y arranca la app:
 
    ```bash
-   make up    # configure_keycloak.py crea el proveedor "google" en Keycloak
-   make run   # write_streamlit_secrets.py genera .streamlit/secrets.toml y arranca Streamlit
+   make up    # configure_keycloak.py crea el proveedor "google" en Keycloak y la app, al
+              # arrancar, genera secrets.toml con write_streamlit_secrets.py
    ```
 
 7. Abre http://localhost:8501. Deben aparecer **«Iniciar sesión con Google»** (pestaña

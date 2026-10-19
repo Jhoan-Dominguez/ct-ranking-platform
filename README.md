@@ -70,15 +70,15 @@ Detalle en [`docs/14`](docs/14-cuentas-seguridad-y-moderacion.md) y
 ```mermaid
 flowchart LR
     browser([Navegador]) -- ":8501" --> app
-    subgraph host["Host · Python 3.13 (.venv)"]
-        app["Streamlit<br/>app/main.py"]
-        subgraph capas[" "]
-            pages["ui/pages · ui/components"] --> logic["services/* · auth/*"] --> data["database/*<br/>SQLAlchemy"]
+    subgraph compose["Compose (Docker o Podman) · ct-ranking"]
+        subgraph appc["Contenedor app · python:3.13-slim"]
+            app["Streamlit<br/>app/main.py"]
+            subgraph capas[" "]
+                pages["ui/pages · ui/components"] --> logic["services/* · auth/*"] --> data["database/*<br/>SQLAlchemy"]
+            end
+            app --- pages
+            job["jobs/purge_accounts<br/>(hilo cada hora)"]
         end
-        app --- pages
-        job["jobs/purge_accounts<br/>(hilo cada hora)"]
-    end
-    subgraph docker["Docker Compose · ct-ranking"]
         db[("PostgreSQL 16<br/>:5432<br/>BD ctranking + keycloak")]
         kc["Keycloak 26.4<br/>:8180"]
         mail["Mailpit<br/>SMTP :1025 · web :8025"]
@@ -137,7 +137,7 @@ SMTP real, secretos y cron) están en [`docs/03`](docs/03-despliegue-y-operacion
 | Datos y gráficas | pandas · Plotly | 3.0.6 · 7.1.0 |
 | Utilidades | bcrypt · Pillow · python-dotenv | 5.0.0 · 12.3.0 · 1.2.4 |
 | Calidad | pytest · ruff · isort · pre-commit | 9.1.1 · 0.17.1 · 9.0.2 · 4.7.0 |
-| Infraestructura | Docker Compose · GNU Make · Python | v2 · 4.x · 3.13 (mín. 3.12) |
+| Infraestructura | Docker Compose o Podman · GNU Make · imagen `python:3.13-slim` | v2 / 4.7+ · 4.x · 3.13 |
 
 Las versiones exactas están en [`requirements.txt`](requirements.txt) y
 [`requirements-dev.txt`](requirements-dev.txt).
@@ -146,16 +146,21 @@ Las versiones exactas están en [`requirements.txt`](requirements.txt) y
 
 **Requisitos:**
 
-- Docker con Docker Compose, Python 3.12 o superior, `make` y Git.
+- Docker (con `docker compose`) **o** Podman (con `podman compose`), `make` y Git.
+- Python 3.12+ sólo si vas a desarrollar (pruebas y lint en `.venv`).
 - Unos 1,5 GB de RAM libres.
 - Puertos libres: 5432, 8180, 1025, 8025 y 8501.
 
 ```bash
-make create      # .env, dependencias en .venv y hooks de pre-commit
-make up          # PostgreSQL + Keycloak + Mailpit; configura Keycloak; crea tablas y datos base
+make up          # imagen de la app + PostgreSQL + Keycloak + Mailpit; configuración; app
 make seed-demo   # (opcional) estudiantes y contenido de demostración
-make run         # http://localhost:8501
+                 # app en http://localhost:8501
+make create      # (desarrollo) .venv con pytest/ruff/isort y hooks de pre-commit
 ```
+
+`make` usa Docker si está instalado y si no Podman (`make up ENGINE=podman` para forzarlo). Los
+archivos de contenedores están en [`container/`](container/) y las limitaciones de Podman en
+[`docs/03`](docs/03-despliegue-y-operacion.md#docker-y-podman).
 
 Detalle de cada paso en [`docs/02`](docs/02-requisitos-e-instalacion.md).
 
@@ -163,16 +168,17 @@ Detalle de cada paso en [`docs/02`](docs/02-requisitos-e-instalacion.md).
 
 | Comando | Qué hace |
 |---------|----------|
-| `make create` | Crea `.env`, instala las dependencias en `.venv` e instala los hooks de pre-commit. |
-| `make up` / `make down` | Levanta (y configura) o detiene los servicios. `down` conserva los datos. |
-| `make run` / `make dev` | Ejecuta la app (`dev` = `up` + `run`). |
+| `make create` | Crea `.env`, instala las herramientas de calidad en `.venv` y los hooks de pre-commit. |
+| `make up` / `make down` | Construye la imagen, levanta y configura todo, o lo detiene. `down` conserva los datos. |
+| `make run` / `make dev` | Reconstruye y reinicia la app, o la levanta con el código montado y recarga al guardar. |
+| `make shell` | Terminal dentro de la imagen de la app. |
 | `make logs` / `make ps` | Logs y estado de los contenedores. |
 | `make init-db` | Crea tablas, agrega columnas nuevas y carga los datos base. Es idempotente. |
 | `make seed-demo` | Carga los datos de demostración. Es idempotente. |
 | `make reset-db` | Recrea las tablas de la app. **Borra los datos.** |
 | `make purge-accounts` | Borra las cuentas cuyo plazo de eliminación venció. |
 | `make migrate-emails` | Pasa los correos de los estudiantes al dominio institucional (`ARGS=--dry-run` para simular). |
-| `make test` | Ejecuta las pruebas. No requiere Docker. |
+| `make test` | Ejecuta las pruebas en `.venv`. No requiere contenedores. |
 | `make lint` / `make format` | Ejecuta pre-commit (isort + ruff) o formatea el código. |
 | `make clean` / `make destroy` | Limpia las cachés o baja todo **borrando los volúmenes**. |
 
@@ -227,13 +233,14 @@ ct-ranking-platform/
 │       ├── components/         # session · actions · formatting · widgets · charts
 │       │                       #   rankings · moderation · sidebar
 │       └── assets/             # sidebar_hover.js
-├── docker/                     # keycloak/ct-ranking-realm.json · postgres/ (BD de Keycloak)
+├── container/                  # Dockerfile · compose.yaml · compose.dev.yaml
+│                               #   keycloak/ct-ranking-realm.json · postgres/ (BD de Keycloak)
 ├── scripts/                    # wait_for_services · configure_keycloak
 │                               #   write_streamlit_secrets · migrate_student_emails
 ├── tests/                      # Una prueba por dominio (SQLite en memoria)
 ├── docs/                       # Documentación técnica (01–15), enunciado, resumen y pensum
 ├── .streamlit/config.toml      # Tema y servidor (secrets.toml se genera y no se versiona)
-├── docker-compose.yml · Makefile · pyproject.toml · .pre-commit-config.yaml
+├── Makefile · pyproject.toml · .pre-commit-config.yaml · .dockerignore
 ├── requirements.txt · requirements-dev.txt · .env.example · .gitignore
 └── README.md · CLAUDE.md
 ```
@@ -365,7 +372,7 @@ erDiagram
 ## Calidad y pruebas
 
 - **Pruebas:** 37 pruebas con **pytest**, organizadas por dominio (`tests/test_<dominio>.py`).
-  - Usan SQLite en memoria, autenticación local y correo en memoria, así que no necesitan Docker.
+  - Usan SQLite en memoria, autenticación local y correo en memoria, así que no necesitan contenedores.
   - Ejecutar todas: `make test`. Una sola:
     `.venv/bin/python -m pytest tests/test_auth.py::test_register_and_login_local`.
 - **pre-commit:** ejecuta **isort**, **ruff check** (`--fix`), **ruff format** y hooks de

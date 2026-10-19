@@ -10,7 +10,7 @@ funcional del proyecto.
 |---|-----------|-----------|
 | 1 | [Visión general](01-vision-general.md) | Propósito, módulos funcionales, roles y glosario. |
 | 2 | [Requisitos e instalación](02-requisitos-e-instalacion.md) | Software necesario, instalación paso a paso y variables de entorno. |
-| 3 | [Despliegue y operación](03-despliegue-y-operacion.md) | Servicios Docker, comandos `make`, puertos, respaldos y recomendaciones para producción. |
+| 3 | [Despliegue y operación](03-despliegue-y-operacion.md) | Contenedores (Docker y Podman), comandos `make`, puertos, respaldos y recomendaciones para producción. |
 | 4 | [Arquitectura](04-arquitectura.md) | Tecnologías, capas, estructura de carpetas y flujo de una petición. |
 | 5 | [Autenticación](05-autenticacion.md) | Keycloak y proveedor local: login, registro, cambio de contraseña, roles. |
 | 6 | [Modelo de datos](06-modelo-de-datos.md) | Diagrama entidad-relación, cada tabla con sus columnas, índices y restricciones. |
@@ -27,10 +27,10 @@ funcional del proyecto.
 ## Inicio rápido
 
 ```bash
-make create      # .env + dependencias en .venv + hooks de pre-commit
-make up          # PostgreSQL + Keycloak + Mailpit en Docker; configura Keycloak, crea tablas y datos base
+make up          # todo en contenedores (Docker o Podman): app, PostgreSQL, Keycloak y Mailpit
 make seed-demo   # usuarios y datos de ejemplo (opcional)
-make run         # http://localhost:8501
+                 # app en http://localhost:8501
+make create      # (desarrollo) .venv con herramientas de calidad + hooks de pre-commit
 ```
 
 - Administrador: `admin` / `Admin123!`.

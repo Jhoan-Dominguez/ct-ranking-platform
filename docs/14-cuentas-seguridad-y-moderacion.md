@@ -23,8 +23,8 @@ Hay dos emisores de correo. Ambos usan el mismo servidor SMTP:
 
 | Emisor | Correos | Configuración |
 |--------|---------|---------------|
-| **Keycloak** | Verificación de cuenta («Verificación de email») y configuración del 2FA («Actualiza tu cuenta») | SMTP del realm, que aplica `scripts/configure_keycloak.py` en cada `make up`. Usa `KEYCLOAK_SMTP_HOST` y `KEYCLOAK_SMTP_PORT`, con valor por defecto `mailpit:1025` dentro de la red de Docker. |
-| **La app** (`app/core/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada, aviso de cancelación, código para confirmar un correo nuevo y aviso de cambio de correo | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `localhost:1025`. |
+| **Keycloak** | Verificación de cuenta («Verificación de email») y configuración del 2FA («Actualiza tu cuenta») | SMTP del realm, que aplica `scripts/configure_keycloak.py` en cada `make up`. Usa `KEYCLOAK_SMTP_HOST` y `KEYCLOAK_SMTP_PORT`, con valor por defecto `mailpit:1025` dentro de la red de compose. |
+| **La app** (`app/core/mailer.py`) | Código para eliminar la cuenta, aviso de eliminación programada, aviso de cancelación, código para confirmar un correo nuevo y aviso de cambio de correo | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_STARTTLS`, `MAIL_FROM`, `MAIL_FROM_NAME`. Por defecto `mailpit:1025` (el contenedor de Mailpit, visto desde el de la app). |
 
 **En desarrollo**, Mailpit (`axllent/mailpit:v1.31.3`) atrapa todos los correos sin enviarlos a
 nadie. Para verlos, abre **http://localhost:8025**. Sus enlaces (activación y 2FA) funcionan
@@ -221,7 +221,7 @@ stateDiagram-v2
 Ejemplo de cron para producción:
 
 ```cron
-15 3 * * * cd /ruta/ct-ranking-platform && .venv/bin/python -m app.jobs.purge_accounts
+15 3 * * * cd /ruta/ct-ranking-platform && make purge-accounts
 ```
 
 ## Cambio de correo (verificado)

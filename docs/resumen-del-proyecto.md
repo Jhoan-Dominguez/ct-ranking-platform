@@ -12,14 +12,16 @@ entre sí. Un panel de administrador permite hacer seguimiento a un estudiante o
 
 ```
 ┌────────────────────┐   ROPC / Admin API   ┌──────────────────────┐
-│ Streamlit (app/)   │ ───────────────────► │ Keycloak 26 (docker) │
+│ Streamlit (app/)   │ ───────────────────► │ Keycloak 26          │
 │  pages → services  │                      │  realm ct-ranking    │
 │        ↓           │                      └──────────┬───────────┘
 │   SQLAlchemy 2     │                                 │ BD "keycloak"
 └─────────┬──────────┘                                 ▼
           │ BD "ctranking"            ┌────────────────────────────┐
-          └─────────────────────────► │ PostgreSQL 16 (docker)     │
+          └─────────────────────────► │ PostgreSQL 16              │
                                       └────────────────────────────┘
+   Todo corre en contenedores (container/compose.yaml, Docker o Podman).
+   La app usa su propia imagen: container/Dockerfile (python:3.13-slim).
 ```
 
 | Capa | Carpeta | Responsabilidad |
@@ -45,7 +47,7 @@ intercambiables con `AUTH_PROVIDER`:
   - El login usa el flujo *Direct Access Grants* contra el realm `ct-ranking`.
   - El registro y los cambios de contraseña, correo y nombre usan la API de administración de
     Keycloak, con la cuenta de servicio del cliente `ct-ranking-app`.
-  - El realm se importa automáticamente desde `docker/keycloak/ct-ranking-realm.json`. Ese archivo
+  - El realm se importa automáticamente desde `container/keycloak/ct-ranking-realm.json`. Ese archivo
     define el cliente, los roles `student`/`admin` y el usuario administrador.
   - La BD de la app guarda el perfil y el `keycloak_id`, nunca la contraseña.
   - Si Keycloak entrega el rol `admin`, el usuario se vuelve administrador. Las promociones hechas
@@ -233,6 +235,11 @@ intercambiables con `AUTH_PROVIDER`:
   un estudiante en riesgo.
 - **Pruebas automatizadas** con pytest sobre SQLite en memoria (`make test`), incluidas las
   pruebas de regresión de la auditoría (`tests/test_audit_validation.py`).
+- **Todo en contenedores, con Docker o Podman** (`container/`): la app tiene su propia imagen
+  (`python:3.13-slim`, usuario sin privilegios) y `make up` construye, configura y levanta todo
+  sin entorno virtual. Imágenes con nombre completo, montajes con etiqueta SELinux y sin escrituras
+  en carpetas del host, para que funcione igual con Podman *rootless*. `make dev` monta el código
+  y recarga al guardar.
 
 ## 3.1 Correcciones de la auditoría técnica
 
@@ -248,7 +255,7 @@ rendimiento. Lo corregido:
     y los enlaces del perfil deben ser `http(s)://`.
   - El token del cliente `ct-ranking-pwcheck` (que no pide 2FA) ya no tiene roles ni audiencia.
   - Límites de intentos: login local, reenvío de correos de Keycloak y códigos por correo.
-  - Las sesiones con contraseña vencen (`SESSION_TTL_HOURS`). Los puertos de Docker se publican
+  - Las sesiones con contraseña vencen (`SESSION_TTL_HOURS`). Los puertos de los contenedores se publican
     sólo en `127.0.0.1`, `secrets.toml` se escribe con permisos `600` y los códigos usan su
     propia clave HMAC (`APP_SECRET_KEY`).
   - Los servicios de administración verifican que quien actúa sea admin.
@@ -274,15 +281,20 @@ rendimiento. Lo corregido:
 
 ## 4. Cómo ejecutarlo
 
-Requisitos: Docker con Docker Compose, Python 3.12+ y `make`.
+Requisitos: Docker (con `docker compose`) **o** Podman (con `podman compose`) y `make`. La app
+corre en su propia imagen (`container/Dockerfile`, basada en `python:3.13-slim`); Python local
+sólo hace falta para las pruebas y el lint.
 
 ```bash
-make create      # .env, dependencias en .venv y hooks de pre-commit
-make up          # PostgreSQL + Keycloak + Mailpit, configura Keycloak y crea las tablas
+make up          # imagen de la app + PostgreSQL + Keycloak + Mailpit, configuración y app
 make seed-demo   # (opcional) usuarios y datos de ejemplo
-make run         # http://localhost:8501
+                 # app en http://localhost:8501
 make down        # detiene los contenedores (conserva datos)
+make create      # (desarrollo) .venv con pytest/ruff/isort y hooks de pre-commit
 ```
+
+Con Podman aunque Docker esté instalado: `make up ENGINE=podman`. Las limitaciones de Podman y
+cómo se resolvieron están en [Despliegue](03-despliegue-y-operacion.md#docker-y-podman).
 
 **Accesos:**
 
@@ -297,10 +309,12 @@ make down        # detiene los contenedores (conserva datos)
 
 | Comando | Qué hace |
 |---------|----------|
-| `make dev` | `up` + `run`. |
+| `make dev` | Como `up`, con el código montado en el contenedor y recarga al guardar. |
+| `make run` | Reconstruye la imagen y reinicia la app. |
+| `make shell` | Terminal dentro de la imagen de la app. |
 | `make logs` | Muestra los logs de los contenedores. |
 | `make ps` | Muestra el estado de los contenedores. |
-| `make test` | Ejecuta las pruebas. |
+| `make test` | Ejecuta las pruebas (en `.venv`, sin contenedores). |
 | `make lint` | Ejecuta pre-commit (isort, ruff y chequeos básicos) sobre todo el repo. |
 | `make format` | Ordena imports y formatea el código. |
 | `make reset-db` | Recrea las tablas de la app. |
