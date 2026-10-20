@@ -35,3 +35,6 @@ Thumbs.db
 *.log
 *.sqlite3
 *.db
+
+# Instrucciones locales para Claude Code
+CLAUDE.md
